@@ -225,7 +225,14 @@ def _build_alexa_client(settings_override: Optional[dict] = None) -> Tuple[Optio
         "Referer": f"https://{alexa_host}/spa/index.html",
         "Origin": f"https://{alexa_host}",
     }
-    client = httpx.Client(cookies=cookies, headers=headers, follow_redirects=True, timeout=12.0)
+    transport = httpx.HTTPTransport(local_address="0.0.0.0")
+    client = httpx.Client(
+        cookies=cookies,
+        headers=headers,
+        follow_redirects=True,
+        timeout=8.0,
+        transport=transport,
+    )
     csrf = _ensure_csrf(client, alexa_host, cookies)
     if csrf:
         client.headers["csrf"] = csrf
@@ -303,8 +310,19 @@ def authenticate_amazon_browser(settings_override: Optional[dict] = None) -> Tup
     ensure_integrations_dir()
     cfg = get_settings(settings_override)
     dom_info = _AMAZON_DOMAINS[cfg["amazon_domain"]]
+    login_host = dom_info["login_host"]
     alexa_host = dom_info["alexa_host"]
-    login_url = f"https://{alexa_host}/api/devices-v2/device?cached=false"
+    assoc = "brflex" if cfg["amazon_domain"] == "amazon.com.br" else "usflex"
+    login_url = (
+        f"https://{login_host}/ap/signin"
+        f"?openid.pape.max_auth_age=0"
+        f"&openid.return_to=https%3A%2F%2F{login_host}%2F%3Fref_%3Dnav_ya_signin"
+        f"&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
+        f"&openid.assoc_handle={assoc}"
+        f"&openid.mode=checkid_setup"
+        f"&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
+        f"&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0"
+    )
 
     async def _run_auth() -> Tuple[bool, str]:
         from playwright.async_api import async_playwright
@@ -327,45 +345,63 @@ def authenticate_amazon_browser(settings_override: Optional[dict] = None) -> Tup
         async with async_playwright() as p:
             ctx = await p.chromium.launch_persistent_context(**launch_kwargs)
             try:
+                # Clear old auth tokens so we wait for a fresh login
+                await ctx.clear_cookies()
                 page = ctx.pages[0] if ctx.pages else await ctx.new_page()
                 await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
 
-                for _ in range(180):
+                for _ in range(240):
+                    if page.is_closed():
+                        break
                     url_now = page.url
-                    body_txt = ""
-                    try:
-                        body_txt = await page.inner_text("body", timeout=1500)
-                    except Exception:
-                        pass
-                    if '"devices"' in body_txt or (
-                        "ap/signin" not in url_now
-                        and "ap/mfa" not in url_now
-                        and "ap/cvf" not in url_now
-                        and ("alexa.amazon" in url_now or "pitangui.amazon" in url_now)
-                    ):
+                    raw_cookies = await ctx.cookies()
+                    cookie_map = {
+                        c["name"]: c["value"]
+                        for c in raw_cookies
+                        if "amazon" in c.get("domain", "")
+                    }
+                    # Only real authenticated tokens (at-acbbr, sess-at-acbbr, at-main, sess-at-main)
+                    has_auth_token = any(
+                        k in ("at-acbbr", "sess-at-acbbr", "at-main", "sess-at-main") and bool(v)
+                        for k, v in cookie_map.items()
+                    )
+                    in_auth_flow = any(
+                        step in url_now
+                        for step in ("/ap/signin", "/ap/mfa", "/ap/cvf", "/ap/challenge", "/ap/register")
+                    )
+                    if has_auth_token and not in_auth_flow:
+                        # Fetch Alexa devices & CSRF inside the authenticated browser session
+                        try:
+                            await page.goto(
+                                f"https://{alexa_host}/api/devices-v2/device?cached=false",
+                                wait_until="domcontentloaded",
+                                timeout=15000,
+                            )
+                            body_txt = await page.inner_text("body", timeout=3000)
+                            if '"devices"' in body_txt:
+                                parsed = json.loads(body_txt)
+                                if isinstance(parsed.get("devices"), list):
+                                    DEVICES_FILE.write_text(
+                                        json.dumps(parsed["devices"], indent=2, ensure_ascii=False),
+                                        encoding="utf-8",
+                                    )
+                                    _secure_chmod(DEVICES_FILE)
+                        except Exception:
+                            pass
                         raw_cookies = await ctx.cookies()
                         cookie_map = {
                             c["name"]: c["value"]
                             for c in raw_cookies
                             if "amazon" in c.get("domain", "")
                         }
-                        if any(k.startswith(("at-", "sess-at-", "ubid-")) for k in cookie_map):
-                            save_cookies(cookie_map)
-                            if '"devices"' in body_txt:
-                                try:
-                                    parsed = json.loads(body_txt)
-                                    if isinstance(parsed.get("devices"), list):
-                                        DEVICES_FILE.write_text(
-                                            json.dumps(parsed["devices"], indent=2, ensure_ascii=False),
-                                            encoding="utf-8",
-                                        )
-                                        _secure_chmod(DEVICES_FILE)
-                                except Exception:
-                                    pass
-                            break
+                        save_cookies(cookie_map)
+                        break
                     await asyncio.sleep(1.0)
             finally:
-                await ctx.close()
+                try:
+                    await ctx.close()
+                except Exception:
+                    pass
 
         ok, devs, _msg = fetch_echo_devices(settings_override)
         if ok:
