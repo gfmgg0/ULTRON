@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/FatihMakes/Mark-LVI",
+  "commit": "4d4035c1b40a3bc796ac63f2f1b6a99bc0dd334d",
+  "review_date": "2026-11-02",
+  "note": "Upstream files compared; ULTRON customizations retained. Local fixes in main.py, ui.py, providers/llm_openai.py, core/network.py and start.sh."
+}
