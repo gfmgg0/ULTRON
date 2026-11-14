@@ -1398,6 +1398,7 @@ class DashboardServer:
             try:
                 from plugins._alexa_core import (
                     alexa_connect_bluetooth_speaker,
+                    alexa_stop_speaking,
                     extract_ultron_voice_command,
                     fetch_recent_voice_history,
                     get_bluetooth_echo_status,
@@ -1406,7 +1407,7 @@ class DashboardServer:
                     update_alexa_state,
                 )
                 # Keep Echo Pop de Gabriel Bluetooth audio + Drop In listening state active
-                if bt_check_counter % 8 == 0:
+                if bt_check_counter % 5 == 0:
                     st_now = load_alexa_state()
                     if st_now.get("dropin_active", True):
                         bt_st = await asyncio.to_thread(get_bluetooth_echo_status)
@@ -1422,7 +1423,7 @@ class DashboardServer:
                     await asyncio.sleep(5.0)
                     continue
 
-                records = await asyncio.to_thread(fetch_recent_voice_history, 8)
+                records = await asyncio.to_thread(fetch_recent_voice_history, 6)
                 if not initialized:
                     for r in records:
                         if r.get("record_key"):
@@ -1434,9 +1435,17 @@ class DashboardServer:
                         if not rk or rk in seen_keys:
                             continue
                         seen_keys.add(rk)
-                        cmd = extract_ultron_voice_command(r.get("transcript", ""))
+                        raw_txt = r.get("transcript", "")
+                        ax_rep = (r.get("alexa_response") or "").lower()
+                        cmd = extract_ultron_voice_command(raw_txt)
                         if cmd:
-                            dev_name = r.get("device_name") or "Echo"
+                            dev_name = r.get("device_name") or "Echo Pop de Gabriel"
+                            # If Alexa started saying "Desculpe, não sei isso" or user called Ultron,
+                            # immediately silence Alexa's default response so ULTRON's voice takes over!
+                            if "ultron" in raw_txt.lower() or any(
+                                k in ax_rep for k in ("não sei", "desculpe", "não conheço", "não entendi", "não tenho certeza")
+                            ):
+                                asyncio.create_task(asyncio.to_thread(alexa_stop_speaking, dev_name))
                             update_alexa_state({
                                 "last_command": cmd,
                                 "last_echo_device": dev_name,
@@ -1451,7 +1460,7 @@ class DashboardServer:
                             }))
             except Exception:
                 pass
-            await asyncio.sleep(2.2)
+            await asyncio.sleep(4.0)
 
     async def serve(self) -> None:
         if not _DEPS_OK:

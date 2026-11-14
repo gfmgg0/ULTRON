@@ -557,6 +557,34 @@ def alexa_text_command(
     return False, details
 
 
+def alexa_stop_speaking(
+    device: str = "Echo Pop de Gabriel",
+    settings_override: Optional[dict] = None,
+) -> Tuple[bool, str]:
+    """Immediately interrupt/stop Alexa's own speech on the Echo so ULTRON's voice takes over."""
+    dev, err = _resolve_echo_device(device, settings_override)
+    if dev is None:
+        return False, err
+    node = {
+        "@type": "com.amazon.alexa.behaviors.model.OpaquePayloadOperationNode",
+        "type": "Alexa.DeviceControls.Stop",
+        "skillId": "amzn1.ask.1p.alexadevicecontrols",
+        "operationPayload": {
+            "deviceType": dev.get("deviceType"),
+            "deviceSerialNumber": dev.get("serialNumber"),
+            "locale": "pt-BR",
+            "customerId": dev.get("deviceOwnerCustomerId"),
+            "devices": [
+                {
+                    "deviceType": dev.get("deviceType"),
+                    "deviceSerialNumber": dev.get("serialNumber"),
+                }
+            ],
+        },
+    }
+    return _execute_alexa_sequence(node, settings_override)
+
+
 def alexa_set_volume(
     volume: int,
     device: str = "",
@@ -911,6 +939,7 @@ def alexa_stop_dropin(
 
 
 _LAST_VOICE_HISTORY_CACHE: list[dict[str, Any]] = []
+_LAST_VOICE_HISTORY_TS: float = 0.0
 
 
 # ── Echo Microphone → ULTRON Voice History Bridge (Zero Skills Needed!) ──────
@@ -921,23 +950,24 @@ def fetch_recent_voice_history(
     """
     Fetch recent voice utterances spoken ONLY to the apartment Echo
     ('Echo Pop de Gabriel' / serial G8M2DB0643540SDW).
+    Uses a 3.5s minimum interval to avoid Amazon CloudFront 503 rate-limiting.
     """
-    global _LAST_VOICE_HISTORY_CACHE
+    import time as _time
+    global _LAST_VOICE_HISTORY_CACHE, _LAST_VOICE_HISTORY_TS
+
+    now = _time.monotonic()
+    if (now - _LAST_VOICE_HISTORY_TS) < 3.5 and _LAST_VOICE_HISTORY_CACHE:
+        return list(_LAST_VOICE_HISTORY_CACHE[:limit])
+
     client, _alexa_host, _err = _build_alexa_client(settings_override)
     if client is None:
         return list(_LAST_VOICE_HISTORY_CACHE[:limit])
     url = "https://www.amazon.com.br/alexa-privacy/apd/rvh/customer-history-records?startTime=0&endTime=9999999999999"
     try:
-        import time as _time
+        _LAST_VOICE_HISTORY_TS = now
         with client:
-            resp = None
-            for _ in range(6):
-                r = client.get(url, timeout=8.0)
-                if r.status_code == 200 and r.text.strip().startswith("{"):
-                    resp = r
-                    break
-                _time.sleep(0.25)
-            if resp is None:
+            resp = client.get(url, timeout=8.0)
+            if resp.status_code != 200 or not resp.text.strip().startswith("{"):
                 return list(_LAST_VOICE_HISTORY_CACHE[:limit])
             data = resp.json()
             records = data.get("customerHistoryRecords") or []
