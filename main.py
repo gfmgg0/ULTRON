@@ -104,7 +104,7 @@ from core.wake_word            import (
 
 # How long the assistant stays awake with no user speech before it auto-sleeps
 # again (wake-word mode only).
-WAKE_SLEEP_TIMEOUT = 120.0   # seconds (2 minutes)
+WAKE_SLEEP_TIMEOUT = 3600.0  # seconds (1 hour of continuous listening)
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -2521,17 +2521,13 @@ class JarvisLive:
                         # is the whole point, and it is invisible otherwise.
                         self.ui.write_log("SYS: Reconnected — conversation restored.")
 
-                    # Wake word: if enabled, come up ASLEEP (mic gated, silent)
-                    # until the user says "Ultron" or taps wake in the UI.
+                    # Wake word ("Ultron"): start AWAKE & LISTENING continuously
+                    # in the apartment; only sleep after 1 hour of total silence.
                     if self._wake_enabled:
                         self._ensure_wake_detector()
-                        self._awake = False
-                        self.ui.set_state("SLEEPING")
-                        self.ui.write_log("SYS: ULTRON pronto para ouvir, Chefe.")
-                    else:
-                        self._awake = True
-                        self.ui.set_state("LISTENING")
-                        self.ui.write_log("SYS: JARVIS online.")
+                    self._awake = True
+                    self.ui.set_state("LISTENING")
+                    self.ui.write_log("SYS: ULTRON em escuta contínua (Wake Word: 'Ultron'), Chefe.")
 
                     # What this machine will not permit, said once, on screen.
                     #

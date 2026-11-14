@@ -220,10 +220,10 @@ class WakeWordDetector:
             speech_samples = 0
             silence_samples = 0
             in_speech = False
-            rms_gate = 280.0
-            min_speech_samples = int(SAMPLE_RATE * 0.32)   # 320 ms
-            max_speech_samples = int(SAMPLE_RATE * 2.20)   # 2.2 s max window
-            pause_samples_needed = int(SAMPLE_RATE * 0.28) # 280 ms pause triggers check
+            noise_floor = 900.0
+            min_speech_samples = int(SAMPLE_RATE * 0.35)   # 350 ms
+            max_speech_samples = int(SAMPLE_RATE * 2.40)   # 2.4 s max window
+            pause_samples_needed = int(SAMPLE_RATE * 0.30) # 300 ms pause triggers check
 
             while self._running:
                 try:
@@ -234,6 +234,11 @@ class WakeWordDetector:
                     if arr.size == 0:
                         continue
                     rms = float(np.sqrt(np.mean(arr.astype(np.float32) ** 2)))
+                    # Dynamically track ambient room noise floor when not speaking
+                    if not in_speech:
+                        noise_floor = 0.92 * noise_floor + 0.08 * min(rms, 3000.0)
+                    rms_gate = max(600.0, noise_floor * 1.65 + 250.0)
+
                     if rms >= rms_gate:
                         in_speech = True
                         silence_samples = 0
@@ -243,6 +248,10 @@ class WakeWordDetector:
                         speech_chunks.append(arr)
                         speech_samples += arr.size
                         silence_samples += arr.size
+                    else:
+                        # Keep 1 trailing pre-roll frame so the start of 'Ultron' is never clipped
+                        speech_chunks = [arr]
+                        speech_samples = arr.size
 
                     should_eval = in_speech and (
                         (speech_samples >= min_speech_samples and silence_samples >= pause_samples_needed)
@@ -263,7 +272,8 @@ class WakeWordDetector:
                             best_of=1,
                             condition_on_previous_text=False,
                             initial_prompt="Ultron, Oi Ultron, Ei Ultron, Jarvis.",
-                            vad_filter=False,
+                            vad_filter=True,
+                            vad_parameters={"min_silence_duration_ms": 200},
                         )
                         text = " ".join(s.text for s in segments).strip()
                         if text:
