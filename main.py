@@ -1535,8 +1535,20 @@ class JarvisLive:
         )
 
     async def _send_realtime(self):
+        _silence_keepalive = b"\x00" * 2048
         while True:
-            msg = await self.out_queue.get()
+            try:
+                msg = await asyncio.wait_for(self.out_queue.get(), timeout=20.0)
+            except asyncio.TimeoutError:
+                # Keep the Gemini Live WebSocket alive while in SLEEPING / standby mode
+                # so the server never drops with '1008 Session closed due to client inactivity'.
+                await self.session.send_realtime_input(
+                    audio=types.Blob(
+                        data=_silence_keepalive,
+                        mime_type="audio/pcm",
+                    )
+                )
+                continue
             # Gemini 3.x Live rejects the old realtime_input.media_chunks field
             # (what `media=...` maps to) and closes the socket with a 1007. Send
             # mic / phone PCM through the new `audio` field instead. Queue items
