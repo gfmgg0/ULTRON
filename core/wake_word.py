@@ -271,27 +271,21 @@ class WakeWordDetector:
                             beam_size=1,
                             best_of=1,
                             condition_on_previous_text=False,
-                            initial_prompt="Ultron, Oi Ultron, Ei Ultron, Jarvis.",
+                            no_speech_threshold=0.6,
+                            log_prob_threshold=-0.8,
                             vad_filter=True,
-                            vad_parameters={"min_silence_duration_ms": 200},
+                            vad_parameters={"min_silence_duration_ms": 250},
                         )
                         text = " ".join(s.text for s in segments).strip()
                         if text:
                             m = _ULTRON_WAKE_RE.search(text)
                             if m:
-                                trailing = (m.group(1) or "").strip()
                                 self._logger(f"Wake word 'Ultron' detectado: \"{text}\"")
                                 self._drain()
                                 try:
                                     self._on_detect()
                                 except Exception as e:
                                     self._logger(f"Wake word: on_detect error — {e}")
-                                if trailing:
-                                    threading.Thread(
-                                        target=self._forward_trailing_command,
-                                        args=(trailing,),
-                                        daemon=True,
-                                    ).start()
                 except Exception as e:
                     self._logger(f"Wake word (Whisper): inference error — {e}")
             return

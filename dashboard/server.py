@@ -1451,7 +1451,7 @@ class DashboardServer:
                                 "last_echo_device": dev_name,
                                 "last_echo_ts": time.time(),
                             })
-                            await self._command_queue.put(cmd)
+                            await self._command_queue.put(f"__ALEXA_VOICE__:{cmd}")
                             if self._wake_callback:
                                 self._wake_callback()
                             asyncio.create_task(self.broadcast({

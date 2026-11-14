@@ -981,6 +981,8 @@ class JarvisLive:
             # guard still lets a genuine reply through, so answering instantly
             # still works. Only our own echo is dropped.
             self._tail_until = time.monotonic() + self._out_latency + _TAIL_MARGIN
+            self._last_assistant_done_ts = time.monotonic()
+            self._last_user_speech = time.monotonic()
         if not value:
             # The echo history is deliberately NOT cleared here: the tail above
             # still needs it to recognise our own voice. It is dropped when the
@@ -989,9 +991,10 @@ class JarvisLive:
         if value:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
-            if self._wake_enabled:
-                self._awake = False
-            self.ui.set_state("SLEEPING" if self._wake_enabled else "LISTENING")
+            # Stay awake in LISTENING mode until _run_sleep_watch() times out
+            self.ui.set_state(
+                "SLEEPING" if (self._wake_enabled and not self._awake) else "LISTENING"
+            )
 
     def set_push_to_talk(self, enabled: bool) -> str:
         """Turn hold-to-talk on or off. Returns the scope actually achieved."""
@@ -1757,6 +1760,7 @@ class JarvisLive:
                                         "ts": datetime.now().isoformat(),
                                     }))
                                 try:
+                                    self._last_assistant_done_ts = time.monotonic()
                                     from plugins._alexa_core import (
                                         alexa_speak as _ax_speak,
                                         get_bluetooth_echo_status as _ax_bt,
@@ -1769,12 +1773,13 @@ class JarvisLive:
                                     if _ets and (time.time() - _ets) < 30.0:
                                         _ax_upd({"last_echo_ts": 0.0})
                                         _bt = _ax_bt()
-                                        # If ULTRON's real voice is NOT already playing on this Echo via Bluetooth,
-                                        # speak the response on the source Echo via Wi-Fi TTS
-                                        _on_bt = _bt.get("ultron_voice_on_echo") and (
-                                            not _edev or "pop" in _edev.lower()
+                                        # Never call Alexa Wi-Fi TTS when Echo Pop Bluetooth is connected,
+                                        # because ULTRON's real voice (Algenib) already played over Bluetooth!
+                                        _on_bt = bool(
+                                            _bt.get("bluetooth_connected")
+                                            or _bt.get("ultron_voice_on_echo")
                                         )
-                                        if not _on_bt:
+                                        if not _on_bt and _edev and _edev != "WakeWord Ultron":
                                             asyncio.create_task(
                                                 asyncio.to_thread(_ax_speak, full_out[:450], _edev)
                                             )
@@ -1843,8 +1848,9 @@ class JarvisLive:
         # tiny buffer is not penalised with a delay it does not need.
         try:
             lat = float(getattr(stream, "latency", 0.0) or 0.0)
-            if 0.0 < lat < 1.0:
-                self._out_latency = lat
+            # Include ~650 ms floor for Bluetooth A2DP wireless buffer on Echo Pop-SDW
+            # so the room microphone never picks up ULTRON's own trailing voice.
+            self._out_latency = max(lat if 0.0 < lat < 1.0 else 0.12, 0.65)
             print(f"[JARVIS] 🔊 Output latency {self._out_latency*1000:.0f} ms "
                   f"→ echo tail {(self._out_latency + _TAIL_MARGIN)*1000:.0f} ms")
         except Exception:
@@ -2250,6 +2256,27 @@ class JarvisLive:
                 )
                 if not text:
                     continue
+                is_alexa_voice = False
+                if text.startswith("__ALEXA_VOICE__:"):
+                    is_alexa_voice = True
+                    text = text[len("__ALEXA_VOICE__:"):].strip()
+                if not text:
+                    continue
+                if is_alexa_voice:
+                    now_m = time.monotonic()
+                    last_done = getattr(self, "_last_assistant_done_ts", 0.0)
+                    with self._speaking_lock:
+                        speaking_now = self._is_speaking
+                    # If the live microphone already heard the user (or ULTRON is already
+                    # answering / just finished answering within the last 15s), drop the
+                    # delayed duplicate transcript from Alexa's cloud voice history!
+                    if (
+                        speaking_now
+                        or (now_m - self._last_user_speech) < 15.0
+                        or (now_m - last_done) < 15.0
+                    ):
+                        print(f"[AlexaBridge] Ignorando comando duplicado (já atendido pelo mic ao vivo): {text}")
+                        continue
                 # Wait up to 8s for session to become ready after a wake
                 for _ in range(80):
                     if self.session:
