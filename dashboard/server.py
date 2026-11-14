@@ -1094,9 +1094,15 @@ class DashboardServer:
                 return JSONResponse({"ok": False, "error": "Invalid X-Ultron-Key"}, status_code=401)
 
             cmd = str(body.get("command") or body.get("text") or "").strip()
+            echo_dev = str(body.get("device") or "").strip()
             try:
                 from plugins._alexa_core import update_alexa_state
-                update_alexa_state({"last_command": cmd, "client_ip": _who(req)})
+                update_alexa_state({
+                    "last_command": cmd,
+                    "last_echo_device": echo_dev,
+                    "last_echo_ts": time.time(),
+                    "client_ip": _who(req),
+                })
             except Exception:
                 pass
 
@@ -1105,7 +1111,7 @@ class DashboardServer:
                 if self._wake_callback:
                     self._wake_callback()
                 asyncio.create_task(self.broadcast(
-                    {"type": "sys", "text": f"Alexa: {cmd}"}
+                    {"type": "sys", "text": f"Alexa ({echo_dev or 'Echo'}): {cmd}"}
                 ))
             return JSONResponse({
                 "ok": True,
@@ -1378,6 +1384,58 @@ class DashboardServer:
               f"(sends you to the secure page)")
         await uvicorn.Server(cfg).serve()
 
+    async def _poll_alexa_voice_history(self) -> None:
+        """
+        Zero-skill Echo Microphone bridge: polls the user's Amazon Brasil voice
+        history every 2.2s. Whenever the user says a phrase containing 'Ultron'
+        to any Echo (e.g. 'Alexa, Ultron que horas são'), it forwards the command
+        into ULTRON's live session!
+        """
+        seen_keys: set[str] = set()
+        initialized = False
+        while True:
+            try:
+                from plugins._alexa_core import (
+                    extract_ultron_voice_command,
+                    fetch_recent_voice_history,
+                    load_saved_cookies,
+                    update_alexa_state,
+                )
+                if not load_saved_cookies():
+                    await asyncio.sleep(5.0)
+                    continue
+
+                records = await asyncio.to_thread(fetch_recent_voice_history, 8)
+                if not initialized:
+                    for r in records:
+                        if r.get("record_key"):
+                            seen_keys.add(r["record_key"])
+                    initialized = True
+                else:
+                    for r in reversed(records):
+                        rk = r.get("record_key") or ""
+                        if not rk or rk in seen_keys:
+                            continue
+                        seen_keys.add(rk)
+                        cmd = extract_ultron_voice_command(r.get("transcript", ""))
+                        if cmd:
+                            dev_name = r.get("device_name") or "Echo"
+                            update_alexa_state({
+                                "last_command": cmd,
+                                "last_echo_device": dev_name,
+                                "last_echo_ts": time.time(),
+                            })
+                            await self._command_queue.put(cmd)
+                            if self._wake_callback:
+                                self._wake_callback()
+                            asyncio.create_task(self.broadcast({
+                                "type": "sys",
+                                "text": f"Alexa Mic ({dev_name}): {cmd}",
+                            }))
+            except Exception:
+                pass
+            await asyncio.sleep(2.2)
+
     async def serve(self) -> None:
         if not _DEPS_OK:
             print("[Dashboard] fastapi/uvicorn not installed — dashboard disabled.")
@@ -1464,4 +1522,5 @@ class DashboardServer:
 
         print(f"[Dashboard] {self.get_url()}")
         print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the QR code.")
+        asyncio.create_task(self._poll_alexa_voice_history())
         await uvicorn.Server(cfg).serve()

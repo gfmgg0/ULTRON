@@ -1756,6 +1756,30 @@ class JarvisLive:
                                         "text": full_out,
                                         "ts": datetime.now().isoformat(),
                                     }))
+                                try:
+                                    from plugins._alexa_core import (
+                                        alexa_speak as _ax_speak,
+                                        get_bluetooth_echo_status as _ax_bt,
+                                        load_alexa_state as _ax_state,
+                                        update_alexa_state as _ax_upd,
+                                    )
+                                    _st = _ax_state()
+                                    _ets = float(_st.get("last_echo_ts") or 0.0)
+                                    _edev = str(_st.get("last_echo_device") or "").strip()
+                                    if _ets and (time.time() - _ets) < 30.0:
+                                        _ax_upd({"last_echo_ts": 0.0})
+                                        _bt = _ax_bt()
+                                        # If ULTRON's real voice is NOT already playing on this Echo via Bluetooth,
+                                        # speak the response on the source Echo via Wi-Fi TTS
+                                        _on_bt = _bt.get("ultron_voice_on_echo") and (
+                                            not _edev or "pop" in _edev.lower()
+                                        )
+                                        if not _on_bt:
+                                            asyncio.create_task(
+                                                asyncio.to_thread(_ax_speak, full_out[:450], _edev)
+                                            )
+                                except Exception:
+                                    pass
                             out_buf = []
 
                             if self._vision_close_pending:

@@ -19,6 +19,8 @@ from __future__ import annotations
 from core import outcome
 from plugins._alexa_core import (
     ALEXA_PLUGIN_SETTINGS,
+    alexa_connect_bluetooth_speaker,
+    alexa_disconnect_bluetooth_speaker,
     alexa_list_routines,
     alexa_set_volume,
     alexa_speak,
@@ -26,6 +28,7 @@ from plugins._alexa_core import (
     alexa_trigger_routine,
     authenticate_amazon_browser,
     fetch_echo_devices,
+    fetch_recent_voice_history,
     get_alexa_status,
 )
 
@@ -34,14 +37,16 @@ PLUGIN_SETTINGS = ALEXA_PLUGIN_SETTINGS
 PLUGIN = {
     "name": "alexa_control",
     "tier": "core",
-    "brief": "Native Amazon Alexa Brasil control (no skills required): speak on Echo, run any voice command, trigger routines, and manage volume.",
+    "brief": "Native Amazon Alexa Brasil control: route ULTRON's voice to Echo via Bluetooth, listen to Echo mic, speak on Echo, run voice commands, and trigger routines.",
     "description": (
         "Integra o ULTRON diretamente à conta Amazon Alexa Brasil (amazon.com.br) sem precisar de "
-        "nenhuma skill externa: conectar conta Amazon pelo navegador (authenticate), consultar estado "
-        "(status), listar aparelhos Echo (list_devices), fazer o Echo falar qualquer frase em voz alta "
-        "(speak, announce), enviar qualquer comando em português para a Alexa executar na casa inteligente "
-        "ou música (text_command: ex. 'acender luz da sala', 'ligar ar condicionado', 'tocar música'), "
-        "listar rotinas (list_routines), disparar rotina (trigger_routine) e ajustar volume do Echo (volume)."
+        "nenhuma skill externa: conectar a voz original do ULTRON na Alexa via Bluetooth (connect_bluetooth, "
+        "disconnect_bluetooth), consultar histórico de voz falado no microfone do Echo (voice_history), "
+        "conectar conta Amazon pelo navegador (authenticate), consultar estado (status), listar aparelhos "
+        "Echo (list_devices), fazer o Echo falar qualquer frase em voz alta (speak, announce), enviar "
+        "qualquer comando em português para a Alexa executar na casa inteligente ou música (text_command: "
+        "ex. 'acender luz da sala', 'ligar ar condicionado', 'tocar música'), listar rotinas (list_routines), "
+        "disparar rotina (trigger_routine) e ajustar volume do Echo (volume)."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -51,6 +56,9 @@ PLUGIN = {
                 "enum": [
                     "status",
                     "authenticate",
+                    "connect_bluetooth",
+                    "disconnect_bluetooth",
+                    "voice_history",
                     "list_devices",
                     "speak",
                     "announce",
@@ -91,14 +99,40 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
     try:
         if action == "status":
             st = get_alexa_status()
+            bt = st.get("bluetooth_echo") or {}
             return outcome.done(
                 "alexa_status",
                 amazon_brasil_connected=st["amazon_brasil_connected"],
                 echo_devices=", ".join(st["echo_devices"]) if st["echo_devices"] else "none",
                 default_echo=st["default_echo_device"],
+                ultron_voice_on_echo_bluetooth=bt.get("ultron_voice_on_echo", False),
+                bluetooth_device=bt.get("paired_name") or "none",
                 webhook_endpoint=st["webhook_endpoint"],
                 last_command_from_alexa=st.get("last_command_from_alexa") or "none",
             )
+
+        if action == "connect_bluetooth":
+            lvl = int(params.get("volume_level") if params.get("volume_level") is not None else 85)
+            ok, details = alexa_connect_bluetooth_speaker(device=device, volume_pct=lvl)
+            if ok:
+                return outcome.done("alexa_connect_bluetooth", details=details)
+            return outcome.failed("alexa_connect_bluetooth", details)
+
+        if action == "disconnect_bluetooth":
+            ok, details = alexa_disconnect_bluetooth_speaker()
+            if ok:
+                return outcome.done("alexa_disconnect_bluetooth", details=details)
+            return outcome.failed("alexa_disconnect_bluetooth", details)
+
+        if action == "voice_history":
+            recs = fetch_recent_voice_history(limit=10)
+            if not recs:
+                return outcome.done("alexa_voice_history", count=0, details="Nenhum comando recente encontrado.")
+            lines = [
+                f"- [{r['device_name']}] \"{r['transcript']}\" -> Alexa: \"{r['alexa_response']}\""
+                for r in recs
+            ]
+            return outcome.done("alexa_voice_history", count=len(recs)) + "\n" + "\n".join(lines)
 
         if action == "authenticate":
             ok, details = authenticate_amazon_browser()

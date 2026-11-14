@@ -642,6 +642,232 @@ def alexa_trigger_routine(
     )
 
 
+# ── Bluetooth Speaker Bridge (Voz Original do ULTRON 'Algenib' no Echo) ──────
+def get_bluetooth_echo_status() -> dict[str, Any]:
+    """Check whether an Amazon Echo is paired/connected via Bluetooth and active as PipeWire audio output."""
+    import re as _re
+    import subprocess as _sp
+
+    paired_mac = ""
+    paired_name = ""
+    connected = False
+    active_sink_id: Optional[int] = None
+    is_default_sink = False
+
+    try:
+        r = _sp.run(["bluetoothctl", "devices"], capture_output=True, text=True, timeout=4)
+        for line in r.stdout.splitlines():
+            if "Echo" in line or "Amazon" in line:
+                parts = line.split(" ", 2)
+                if len(parts) >= 3:
+                    paired_mac = parts[1].strip()
+                    paired_name = parts[2].strip()
+                    break
+        if paired_mac:
+            info = _sp.run(["bluetoothctl", "info", paired_mac], capture_output=True, text=True, timeout=4)
+            connected = "Connected: yes" in info.stdout
+    except Exception:
+        pass
+
+    try:
+        wp = _sp.run(["wpctl", "status"], capture_output=True, text=True, timeout=4)
+        in_sinks = False
+        for line in wp.stdout.splitlines():
+            if "Sinks:" in line:
+                in_sinks = True
+                continue
+            if in_sinks and any(k in line for k in ("Sources:", "Filters:", "Streams:", "Video")):
+                in_sinks = False
+            if in_sinks and ("Echo" in line or "Amazon" in line):
+                m = _re.search(r"(\d+)\.\s+(Echo[^\[]+|Amazon[^\[]+)", line)
+                if m:
+                    active_sink_id = int(m.group(1))
+                    is_default_sink = "*" in line[: line.find(m.group(1))]
+                    break
+    except Exception:
+        pass
+
+    return {
+        "paired_mac": paired_mac,
+        "paired_name": paired_name,
+        "bluetooth_connected": connected,
+        "pipewire_sink_id": active_sink_id,
+        "ultron_voice_on_echo": bool(connected and active_sink_id and is_default_sink),
+    }
+
+
+def alexa_connect_bluetooth_speaker(
+    device: str = "",
+    volume_pct: int = 85,
+    settings_override: Optional[dict] = None,
+) -> Tuple[bool, str]:
+    """
+    Connect the PC to the Amazon Echo via Bluetooth and set it as the default
+    PipeWire audio output sink so ULTRON's real voice ('Algenib' in Gemini Live)
+    plays directly through the Echo speaker!
+    """
+    import subprocess as _sp
+    import time as _time
+
+    bt = get_bluetooth_echo_status()
+    mac = bt.get("paired_mac", "")
+    name = bt.get("paired_name") or "Echo"
+
+    if not mac:
+        # Ask Alexa to enter Bluetooth connect/pair mode first
+        alexa_text_command("conectar bluetooth", device=device, settings_override=settings_override)
+        return (
+            False,
+            "Nenhum Echo pareado no Bluetooth do Linux ainda. Diga 'Alexa, parear Bluetooth' e pareie o Echo nas configurações Bluetooth do sistema.",
+        )
+
+    if not bt.get("bluetooth_connected"):
+        try:
+            alexa_text_command("conectar bluetooth", device=device or name, settings_override=settings_override)
+        except Exception:
+            pass
+        try:
+            _sp.run(["bluetoothctl", "connect", mac], capture_output=True, text=True, timeout=10)
+        except Exception as exc:
+            return False, f"Erro ao conectar Bluetooth com {name} ({mac}): {exc}"
+
+    # Wait briefly for PipeWire bluez5 sink to register
+    sink_id: Optional[int] = None
+    for _ in range(12):
+        st = get_bluetooth_echo_status()
+        sink_id = st.get("pipewire_sink_id")
+        if sink_id:
+            break
+        _time.sleep(0.35)
+
+    if not sink_id:
+        return False, f"Bluetooth conectado a {name} ({mac}), mas o sink de áudio PipeWire ainda não apareceu."
+
+    vol_float = max(0.1, min(1.0, float(volume_pct) / 100.0))
+    try:
+        _sp.run(["wpctl", "set-default", str(sink_id)], check=False, timeout=4)
+        _sp.run(["wpctl", "set-volume", str(sink_id), f"{vol_float:.2f}"], check=False, timeout=4)
+    except Exception as exc:
+        return False, f"Conectado ao Bluetooth {name}, mas falhou ao definir saída padrão no PipeWire: {exc}"
+
+    update_alexa_state({"bluetooth_speaker_active": True, "bluetooth_echo_name": name, "bluetooth_mac": mac})
+    return (
+        True,
+        f"Voz original do ULTRON (Algenib) agora está saindo diretamente na sua Alexa '{name}' ({mac}) via Bluetooth (Sink #{sink_id})!",
+    )
+
+
+def alexa_disconnect_bluetooth_speaker() -> Tuple[bool, str]:
+    """Disconnect Echo Bluetooth audio so ULTRON's voice returns to the PC speaker."""
+    import subprocess as _sp
+
+    bt = get_bluetooth_echo_status()
+    mac = bt.get("paired_mac", "")
+    name = bt.get("paired_name") or "Echo"
+    if not mac:
+        return False, "Nenhum dispositivo Echo Bluetooth encontrado."
+    try:
+        _sp.run(["bluetoothctl", "disconnect", mac], capture_output=True, text=True, timeout=8)
+        update_alexa_state({"bluetooth_speaker_active": False})
+        return True, f"Áudio Bluetooth desconectado do '{name}'. A voz do ULTRON voltou para o alto-falante do PC."
+    except Exception as exc:
+        return False, f"Erro ao desconectar Bluetooth do '{name}': {exc}"
+
+
+_LAST_VOICE_HISTORY_CACHE: list[dict[str, Any]] = []
+
+
+# ── Echo Microphone → ULTRON Voice History Bridge (Zero Skills Needed!) ──────
+def fetch_recent_voice_history(
+    limit: int = 12,
+    settings_override: Optional[dict] = None,
+) -> list[dict[str, Any]]:
+    """
+    Fetch recent voice utterances spoken to any Echo on the user's Amazon Brasil
+    account (`customer-history-records`).
+    """
+    global _LAST_VOICE_HISTORY_CACHE
+    client, _alexa_host, _err = _build_alexa_client(settings_override)
+    if client is None:
+        return list(_LAST_VOICE_HISTORY_CACHE[:limit])
+    url = "https://www.amazon.com.br/alexa-privacy/apd/rvh/customer-history-records?startTime=0&endTime=9999999999999"
+    try:
+        import time as _time
+        with client:
+            resp = None
+            for _ in range(6):
+                r = client.get(url, timeout=8.0)
+                if r.status_code == 200 and r.text.strip().startswith("{"):
+                    resp = r
+                    break
+                _time.sleep(0.25)
+            if resp is None:
+                return list(_LAST_VOICE_HISTORY_CACHE[:limit])
+            data = resp.json()
+            records = data.get("customerHistoryRecords") or []
+            out: list[dict[str, Any]] = []
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+                items = rec.get("voiceHistoryRecordItems") or []
+                transcript = ""
+                alexa_reply = ""
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    itype = item.get("recordItemType")
+                    txt = str(item.get("transcriptText") or "").strip()
+                    if itype == "CUSTOMER_TRANSCRIPT" and txt and not transcript:
+                        transcript = txt
+                    elif itype == "ALEXA_RESPONSE" and txt and not alexa_reply:
+                        alexa_reply = txt
+                if transcript:
+                    out.append({
+                        "record_key": str(rec.get("recordKey") or ""),
+                        "timestamp": int(rec.get("timestamp") or 0),
+                        "device_name": str((rec.get("device") or {}).get("deviceName") or "Echo"),
+                        "utterance_type": str(rec.get("utteranceType") or ""),
+                        "transcript": transcript,
+                        "alexa_response": alexa_reply,
+                    })
+                if len(out) >= limit:
+                    break
+            if out:
+                _LAST_VOICE_HISTORY_CACHE = out
+            return out
+    except Exception:
+        return list(_LAST_VOICE_HISTORY_CACHE[:limit])
+
+
+def extract_ultron_voice_command(transcript: str) -> Optional[str]:
+    """
+    Given a raw Portuguese transcript spoken to an Echo microphone (e.g.,
+    'ultron qual é a minha agenda de hoje' or 'pergunta pro ultron que horas são'),
+    extract the command intended for ULTRON. Returns None if not addressed to ULTRON.
+    """
+    import re as _re
+
+    raw = (transcript or "").strip()
+    if not raw:
+        return None
+    low = raw.lower()
+    # Strip leading wake word 'alexa' if present
+    low = _re.sub(r"^alexa[\s,.:;-]*", "", low).strip()
+
+    # Check if the user mentioned 'ultron' (or 'utron' / 'ultrão' common ASR variants)
+    m = _re.search(
+        r"\b(?:pergunta\s+pro\s+|pergunte\s+ao\s+|fale\s+com\s+o\s+|diga\s+ao\s+|manda\s+o\s+|modo\s+|ativar\s+)?(?:ultron|utron|ultrão|jarvis)\b[\s,.:;-]*(.*)$",
+        low,
+         flags=_re.IGNORECASE,
+    )
+    if not m:
+        return None
+    cmd = m.group(1).strip()
+    if not cmd:
+        return "Olá Ultron, estou falando com você pelo microfone da Alexa. Diga que está pronto na escuta."
+    return cmd
+
+
 def get_alexa_status(settings_override: Optional[dict] = None) -> dict[str, Any]:
     cfg = get_settings(settings_override)
     state = load_alexa_state()
@@ -653,11 +879,14 @@ def get_alexa_status(settings_override: Optional[dict] = None) -> dict[str, Any]
         except Exception:
             devices = []
     echo_names = [d.get("accountName", "") for d in devices if d.get("accountName")]
+    bt = get_bluetooth_echo_status()
     ip = _local_ip()
     return {
         "amazon_brasil_connected": bool(cookies),
         "echo_devices": echo_names,
         "default_echo_device": cfg["default_echo_device"] or (echo_names[0] if echo_names else "auto"),
+        "bluetooth_echo": bt,
+        "echo_mic_bridge_enabled": True,
         "home_assistant_configured": bool(cfg["ha_url"] and cfg["ha_token"]),
         "skill_endpoint": f"http://{ip}:8000/api/alexa/skill",
         "webhook_endpoint": f"http://{ip}:8000/api/alexa/webhook",
@@ -674,6 +903,9 @@ def test_or_connect_alexa_ui(values: dict) -> Tuple[bool, str]:
     ok, devs, msg = fetch_echo_devices(settings_override=values)
     if ok and devs:
         names = ", ".join(d.get("accountName", "Echo") for d in devs[:5])
+        bt_ok, bt_msg = alexa_connect_bluetooth_speaker(settings_override=values)
+        if bt_ok:
+            return True, f"Conectado! Echos: {names} | {bt_msg}"
         ok_spk, spk_msg = alexa_speak(
             "Ultron conectado diretamente à sua conta Amazon Brasil, Chefe.",
             settings_override=values,
