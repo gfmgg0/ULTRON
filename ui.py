@@ -6374,18 +6374,18 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{ color: {C.TEXT}; border: 1px solid {C.BORDER_B}; }}"""
         self._wake_btn.setEnabled(True)
         if not st["ready"]:
-            self._wake_btn.setText("⬇  WAKE WORD: DOWNLOAD")
+            self._wake_btn.setText("⬇  WAKE WORD (ULTRON): DOWNLOAD")
             self._wake_btn.setStyleSheet(_off)
             self._wake_sleep_btn.hide()
         elif st["enabled"]:
-            self._wake_btn.setText("🎙  WAKE WORD: ON")
+            self._wake_btn.setText("🎙  WAKE WORD (ULTRON): ON")
             self._wake_btn.setStyleSheet(_on)
             self._wake_sleep_btn.hide()
-            self._wake_btn.setToolTip("Modo opcional de ativação por Hey Jarvis. Desativado para escuta direta.")
+            self._wake_btn.setToolTip("Palavra de ativação 'ULTRON' ativa. Diga 'Ultron' para acionar o sistema.")
             self._wake_sleep_btn.setText("😴  SLEEP NOW" if st["awake"] else "👂  WAKE NOW")
             self._wake_sleep_btn.setStyleSheet(_off)
         else:
-            self._wake_btn.setText("🎙  WAKE WORD: OFF")
+            self._wake_btn.setText("🎙  WAKE WORD (ULTRON): OFF")
             self._wake_btn.setStyleSheet(_off)
             self._wake_sleep_btn.hide()
 

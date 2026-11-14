@@ -982,9 +982,10 @@ def fetch_recent_voice_history(
 
 def extract_ultron_voice_command(transcript: str) -> Optional[str]:
     """
-    Given a raw Portuguese transcript spoken to an Echo microphone (e.g.,
-    'ultron qual é a minha agenda de hoje' or 'pergunta pro ultron que horas são'),
-    extract the command intended for ULTRON. Returns None if not addressed to ULTRON.
+    Given a raw Portuguese transcript spoken to the apartment Echo microphone
+    ('Echo Pop de Gabriel'), extract the command intended for ULTRON.
+    When `dropin_active` / continuous listening is on (default True), forwards
+    any valid spoken command even if the user didn't repeat the word 'Ultron'.
     """
     import re as _re
 
@@ -994,19 +995,26 @@ def extract_ultron_voice_command(transcript: str) -> Optional[str]:
     low = raw.lower()
     # Strip leading wake word 'alexa' if present
     low = _re.sub(r"^alexa[\s,.:;-]*", "", low).strip()
+    if not low or low in ("pare", "parar", "cancelar", "desligar", "conectar bluetooth"):
+        return None
 
     # Check if the user mentioned 'ultron' (or 'utron' / 'ultrão' common ASR variants)
     m = _re.search(
-        r"\b(?:pergunta\s+pro\s+|pergunte\s+ao\s+|fale\s+com\s+o\s+|diga\s+ao\s+|manda\s+o\s+|modo\s+|ativar\s+)?(?:ultron|utron|ultrão|jarvis)\b[\s,.:;-]*(.*)$",
+        r"\b(?:pergunta\s+pro\s+|pergunte\s+ao\s+|fale\s+com\s+o\s+|diga\s+ao\s+|manda\s+o\s+|modo\s+|ativar\s+)?(?:ultron|utron|ultrão|ultram|otron|jarvis)\b[\s,.:;-]*(.*)$",
         low,
-         flags=_re.IGNORECASE,
+        flags=_re.IGNORECASE,
     )
-    if not m:
-        return None
-    cmd = m.group(1).strip()
-    if not cmd:
-        return "Olá Ultron, estou falando com você pelo microfone da Alexa. Diga que está pronto na escuta."
-    return cmd
+    if m:
+        cmd = m.group(1).strip()
+        if not cmd:
+            return "Olá Ultron, estou falando com você na Alexa. Diga que está pronto na escuta."
+        return cmd
+
+    # If continuous Drop In listening mode is enabled on the apartment Echo, forward directly!
+    state = load_alexa_state()
+    if state.get("dropin_active", True) and len(low) >= 3:
+        return low
+    return None
 
 
 def get_alexa_status(settings_override: Optional[dict] = None) -> dict[str, Any]:

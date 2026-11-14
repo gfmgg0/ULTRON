@@ -1393,14 +1393,31 @@ class DashboardServer:
         """
         seen_keys: set[str] = set()
         initialized = False
+        bt_check_counter = 0
         while True:
             try:
                 from plugins._alexa_core import (
+                    alexa_connect_bluetooth_speaker,
                     extract_ultron_voice_command,
                     fetch_recent_voice_history,
+                    get_bluetooth_echo_status,
+                    load_alexa_state,
                     load_saved_cookies,
                     update_alexa_state,
                 )
+                # Keep Echo Pop de Gabriel Bluetooth audio + Drop In listening state active
+                if bt_check_counter % 8 == 0:
+                    st_now = load_alexa_state()
+                    if st_now.get("dropin_active", True):
+                        bt_st = await asyncio.to_thread(get_bluetooth_echo_status)
+                        if not bt_st.get("ultron_voice_on_echo"):
+                            await asyncio.to_thread(
+                                alexa_connect_bluetooth_speaker,
+                                "Echo Pop de Gabriel",
+                                85,
+                            )
+                bt_check_counter += 1
+
                 if not load_saved_cookies():
                     await asyncio.sleep(5.0)
                     continue
