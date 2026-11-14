@@ -46,8 +46,29 @@ if _platform.system() == "Linux":
 # ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio
+import collections
 import re
 import threading
+
+_SLEEP_COMMAND_RE = re.compile(
+    r"\b("
+    r"descanse|descansar|pode\s+descansar|modo\s+descanso|modo\s+de\s+descanso|"
+    r"modo\s+de\s+espera|entrar\s+em\s+espera|dormir|pode\s+dormir|dispensado|"
+    r"stand\s*by|standby|desligar\s+escuta|parar\s+de\s+ouvir|pare\s+de\s+ouvir|"
+    r"obrigad[oa]|muito\s+obrigad[oa]|valeu|agrade[cç]o|tchau|at[eé]\s+logo|at[eé]\s+mais"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_ALEXA_DISCONNECT_RE = re.compile(
+    r"\b(desconect(?:ar|e|a)\s+(?:da\s+|a\s+)?alexa|sair\s+da\s+alexa|desativ(?:ar|e)\s+(?:a\s+)?alexa|deslig(?:ar|ue)\s+(?:a\s+)?alexa)\b",
+    re.IGNORECASE,
+)
+
+_ALEXA_CONNECT_RE = re.compile(
+    r"\b(conect(?:ar|e|a)\s+(?:na|à|a|com\s+a)\s+alexa|ativ(?:ar|e)\s+(?:a\s+)?alexa)\b",
+    re.IGNORECASE,
+)
 import time
 import json
 import sys
@@ -450,12 +471,26 @@ TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "standby_ultron",
+        "description": (
+            "Puts ULTRON into standby/sleep mode (desliga a escuta ativa e volta a aguardar apenas a palavra de ativação 'Ultron'). "
+            "Call this tool WHENEVER the user tells you to rest, sleep, standby, stop listening, or thanks you "
+            "(e.g. 'pode descansar', 'descanse', 'descansar', 'dormir', 'modo de espera', 'dispensado', 'standby', "
+            "'parar de ouvir', 'obrigado', 'muito obrigado', 'valeu', 'agradeço', 'tchau', 'até logo'). "
+            "Reply with a brief polite acknowledgment (e.g. 'À disposição, Chefe. Entrando em modo de descanso.')."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {},
+        },
+    },
+    {
         "name": "shutdown_jarvis",
         "description": (
-            "Shuts down the assistant completely. "
-            "Call this when the user expresses intent to end the conversation, "
-            "close the assistant, say goodbye, or stop Jarvis. "
-            "The user can say this in ANY language."
+            "Closes and exits the entire desktop application process. "
+            "ONLY call this if the user explicitly asks to close/exit the application window itself "
+            "(e.g. 'fechar o programa do Ultron', 'encerrar aplicativo'). "
+            "For 'obrigado', 'tchau', 'pode descansar', or 'descanse', call 'standby_ultron' instead!"
         ),
         "parameters": {
             "type": "OBJECT",
@@ -706,10 +741,14 @@ class JarvisLive:
 
         # ── Wake word ────────────────────────────────────────────────────────
         # _awake gates the mic (see _listen_audio) and the background speakers.
-        # It is True whenever wake word is OFF, so default behaviour is unchanged.
+        # Wake word 'Ultron' activates listening, and ULTRON stays awake until
+        # the user tells him to rest ('descansar') or thanks him ('obrigado').
         self._quiet_mode = bool(load_api_keys().get("quiet_mode", False))
-        self._wake_enabled     = get_wake_word_enabled()
-        self._awake            = not self._wake_enabled
+        self._wake_enabled     = True
+        save_wake_word_enabled(True)
+        self._awake            = False
+        self._sleep_after_turn = False
+        self._wake_preroll: collections.deque[bytes] = collections.deque(maxlen=65)
         self._wake_detector: WakeWordDetector | None = None
         self._wake_sleep_timeout = WAKE_SLEEP_TIMEOUT
 
@@ -749,39 +788,51 @@ class JarvisLive:
         return True
 
     def _on_wake_detected(self) -> None:
-        """Called from the detector thread when 'Hey Jarvis' is heard."""
-        self.wake(reason="wake word")
+        """Called from the detector thread when 'Ultron' is heard."""
+        self.wake(reason="palavra de ativação 'Ultron'")
 
 
     def wake(self, reason: str = "wake word") -> None:
         if self._awake:
             return
+        self._sleep_after_turn = False
         self._awake = True
-        self._last_user_speech = time.monotonic()   # start the auto-sleep clock now
+        self._last_user_speech = time.monotonic()
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
-        self.ui.write_log(f"SYS: Awake — {reason}.")
+        self.ui.write_log(f"SYS: Escuta ativa ligada — {reason}. (Diga 'pode descansar' ou 'obrigado' para desligar a escuta).")
+        # Flush the ~2s pre-roll audio buffer into Gemini Live so it hears the wake phrase / command
+        loop = getattr(self, "_loop", None)
+        q = getattr(self, "out_queue", None)
+        if loop and q and self._wake_preroll:
+            frames = list(self._wake_preroll)
+            self._wake_preroll.clear()
+            def _flush_preroll():
+                for chunk_bytes in frames:
+                    try:
+                        q.put_nowait({"data": chunk_bytes, "mime_type": "audio/pcm"})
+                    except Exception:
+                        break
+            try:
+                loop.call_soon_threadsafe(_flush_preroll)
+            except Exception:
+                pass
 
-    def sleep(self, reason: str = "timeout") -> None:
+    def sleep(self, reason: str = "descanso") -> None:
+        self._sleep_after_turn = False
         if not self._awake:
+            self.ui.set_state("SLEEPING")
             return
         self._awake = False
+        self._wake_preroll.clear()
         self.set_speaking(False)
         self.ui.set_state("SLEEPING")
-        self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Ultron' to wake me.")
+        self.ui.write_log(f"SYS: Modo de descanso ({reason}). Diga 'Ultron' para ligar a escuta novamente.")
 
     async def _run_sleep_watch(self) -> None:
-        """Auto-sleep after the configured silence window (wake-word mode only)."""
+        """No automatic timeout: ULTRON stays listening until told to rest ('descansar') or thanked ('obrigado')."""
         while True:
-            await asyncio.sleep(5)
-            if not self._wake_enabled or not self._awake:
-                continue
-            with self._speaking_lock:
-                speaking = self._is_speaking
-            if speaking:
-                continue
-            if (time.monotonic() - self._last_user_speech) > self._wake_sleep_timeout:
-                self.sleep(reason="no speech for 2 minutes")
+            await asyncio.sleep(60)
 
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
@@ -991,10 +1042,17 @@ class JarvisLive:
         if value:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
-            # Stay awake in LISTENING mode until _run_sleep_watch() times out
-            self.ui.set_state(
-                "SLEEPING" if (self._wake_enabled and not self._awake) else "LISTENING"
-            )
+            if getattr(self, "_sleep_after_turn", False):
+                self._sleep_after_turn = False
+                self._awake = False
+                self._wake_preroll.clear()
+                self._ensure_wake_detector()
+                self.ui.set_state("SLEEPING")
+                self.ui.write_log("SYS: Modo de descanso ativo — diga 'Ultron' para ligar a escuta novamente.")
+            else:
+                self.ui.set_state(
+                    "SLEEPING" if (self._wake_enabled and not self._awake) else "LISTENING"
+                )
 
     def set_push_to_talk(self, enabled: bool) -> str:
         """Turn hold-to-talk on or off. Returns the scope actually achieved."""
@@ -1144,7 +1202,12 @@ class JarvisLive:
             f"[IDENTITY]\n"
             f"Your name is {self._asst_name}. "
             f"Always refer to yourself as {self._asst_name}.\n"
-            f"{_addr}\n\n"
+            f"{_addr}\n"
+            f"WAKE WORD & STANDBY RULES:\n"
+            f"- Your active listening is turned ON by the wake word 'Ultron' and stays ON continuously until the user explicitly tells you to rest ('pode descansar', 'descanse', 'descansar', 'dormir', 'dispensado', 'modo de espera', 'parar de ouvir') OR thanks you ('obrigado', 'muito obrigado', 'valeu', 'agradeço', 'tchau', 'até logo').\n"
+            f"- Whenever the user tells you to rest or thanks you, call the tool `standby_ultron` and reply briefly (e.g., 'À disposição, Chefe. Entrando em modo de descanso.').\n"
+            f"- Whenever the user asks to disconnect from Alexa ('desconecte da Alexa', 'desconectar da Alexa', 'sair da Alexa', 'desligar Alexa'), immediately call `alexa_control` with `action='disconnect_bluetooth'`.\n"
+            f"- Whenever the user asks to connect to Alexa ('conecte na Alexa', 'usar a Alexa'), call `alexa_control` with `action='connect_bluetooth'`.\n\n"
         )
 
         # Everything the model is told about *itself* is derived here, not
@@ -1401,22 +1464,20 @@ class JarvisLive:
                 else:
                     result = "Specify action (add/remove/list) and a topic."
 
+            elif name == "standby_ultron":
+                self._sleep_after_turn = True
+                result = (
+                    "Modo de descanso armado: a escuta ativa será desligada assim que você concluir sua frase de despedida "
+                    "e voltará a ligar quando o Chefe disser 'Ultron'."
+                )
+
             elif name == "shutdown_jarvis":
-                self.ui.write_log("SYS: Shutdown requested.")
-                async def _do_shutdown():
-                    await self._save_session_summary()
-                    if self.session:
-                        try:
-                            await self.session.send_client_content(
-                                turns={"role": "user", "parts": [{"text": "Say a brief natural goodbye to the user."}]},
-                                turn_complete=True,
-                            )
-                        except Exception:
-                            pass
-                    await asyncio.sleep(1.5)
-                    import os as _os
-                    _os._exit(0)
-                asyncio.create_task(_do_shutdown())
+                # Put ULTRON into standby/sleep mode instead of killing the window
+                self._sleep_after_turn = True
+                result = (
+                    "Modo de descanso armado: a escuta ativa será desligada assim que você concluir sua despedida "
+                    "e voltará a ligar quando o Chefe disser 'Ultron'."
+                )
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
@@ -1501,6 +1562,10 @@ class JarvisLive:
             # only a queue push, so the audio path is never slowed. When wake word
             # is off (default) or we're awake, this is a single boolean check.
             if self._wake_enabled and not self._awake:
+                try:
+                    self._wake_preroll.append(indata.tobytes())
+                except Exception:
+                    pass
                 det = self._wake_detector
                 if det is not None:
                     det.feed(indata)
@@ -1740,6 +1805,17 @@ class JarvisLive:
                                         "text": full_in,
                                         "ts": datetime.now().isoformat(),
                                     }))
+                                # Detect voice request to disconnect or connect Alexa Bluetooth
+                                if _ALEXA_DISCONNECT_RE.search(full_in):
+                                    from plugins._alexa_core import alexa_disconnect_bluetooth_speaker as _ax_disc
+                                    asyncio.create_task(asyncio.to_thread(_ax_disc))
+                                elif _ALEXA_CONNECT_RE.search(full_in):
+                                    from plugins._alexa_core import alexa_connect_bluetooth_speaker as _ax_conn
+                                    asyncio.create_task(asyncio.to_thread(_ax_conn, "Echo Pop de Gabriel", 85))
+                                # Detect voice request to rest ('descansar') or thank-you ('obrigado' / 'valeu')
+                                if _SLEEP_COMMAND_RE.search(full_in):
+                                    self._sleep_after_turn = True
+                                    print(f"[Wake] Comando de descanso/agradecimento detectado em \"{full_in}\" — desligando escuta após resposta.")
                             in_buf = []
 
                             full_out = " ".join(out_buf).strip()
@@ -2548,13 +2624,17 @@ class JarvisLive:
                         # is the whole point, and it is invisible otherwise.
                         self.ui.write_log("SYS: Reconnected — conversation restored.")
 
-                    # Wake word ("Ultron"): start AWAKE & LISTENING continuously
-                    # in the apartment; only sleep after 1 hour of total silence.
+                    # Wake word ("Ultron"):
+                    # - Starts in SLEEPING mode waiting for 'Ultron' (or preserves state on reconnect)
+                    # - Once woken by 'Ultron', stays in LISTENING mode until user says 'descansar' or 'obrigado'!
                     if self._wake_enabled:
                         self._ensure_wake_detector()
-                    self._awake = True
-                    self.ui.set_state("LISTENING")
-                    self.ui.write_log("SYS: ULTRON em escuta contínua (Wake Word: 'Ultron'), Chefe.")
+                    if self._awake:
+                        self.ui.set_state("LISTENING")
+                        self.ui.write_log("SYS: Escuta do ULTRON ativa (diga 'pode descansar' ou 'obrigado' para desligar).")
+                    else:
+                        self.ui.set_state("SLEEPING")
+                        self.ui.write_log("SYS: Modo de descanso ativo — diga 'Ultron' para ligar a escuta, Chefe.")
 
                     # What this machine will not permit, said once, on screen.
                     #

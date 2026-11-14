@@ -812,10 +812,6 @@ def alexa_connect_bluetooth_speaker(
 
     if not bt.get("bluetooth_connected"):
         try:
-            alexa_text_command("conectar bluetooth", device=device or name, settings_override=settings_override)
-        except Exception:
-            pass
-        try:
             _sp.run(["bluetoothctl", "connect", mac], capture_output=True, text=True, timeout=10)
         except Exception as exc:
             return False, f"Erro ao conectar Bluetooth com {name} ({mac}): {exc}"
@@ -839,28 +835,41 @@ def alexa_connect_bluetooth_speaker(
     except Exception as exc:
         return False, f"Conectado ao Bluetooth {name}, mas falhou ao definir saída padrão no PipeWire: {exc}"
 
-    update_alexa_state({"bluetooth_speaker_active": True, "bluetooth_echo_name": name, "bluetooth_mac": mac})
+    update_alexa_state({
+        "bluetooth_speaker_active": True,
+        "bluetooth_echo_name": name,
+        "bluetooth_mac": mac,
+        "dropin_active": True,
+    })
     return (
         True,
-        f"Voz original do ULTRON (Algenib) agora está saindo diretamente na sua Alexa '{name}' ({mac}) via Bluetooth (Sink #{sink_id})!",
+        f"Voz original do ULTRON (Algenib) conectada à sua Alexa '{name}' ({mac}) via Bluetooth (Sink #{sink_id})!",
     )
 
 
 def alexa_disconnect_bluetooth_speaker() -> Tuple[bool, str]:
-    """Disconnect Echo Bluetooth audio so ULTRON's voice returns to the PC speaker."""
+    """Disconnect Echo Bluetooth audio and stop any Alexa searching/speech so ULTRON returns to the PC speaker."""
     import subprocess as _sp
 
+    try:
+        alexa_stop_speaking("Echo Pop de Gabriel")
+    except Exception:
+        pass
+
     bt = get_bluetooth_echo_status()
-    mac = bt.get("paired_mac", "")
-    name = bt.get("paired_name") or "Echo"
-    if not mac:
-        return False, "Nenhum dispositivo Echo Bluetooth encontrado."
+    mac = bt.get("paired_mac") or "20:BE:B8:8E:9E:78"
+    name = bt.get("paired_name") or "Echo Pop de Gabriel"
     try:
         _sp.run(["bluetoothctl", "disconnect", mac], capture_output=True, text=True, timeout=8)
-        update_alexa_state({"bluetooth_speaker_active": False})
-        return True, f"Áudio Bluetooth desconectado do '{name}'. A voz do ULTRON voltou para o alto-falante do PC."
-    except Exception as exc:
-        return False, f"Erro ao desconectar Bluetooth do '{name}': {exc}"
+    except Exception:
+        pass
+    _set_pc_speaker_default(85)
+    update_alexa_state({
+        "bluetooth_speaker_active": False,
+        "dropin_active": False,
+        "last_echo_ts": 0.0,
+    })
+    return True, f"Desconectado da Alexa ('{name}'). O Bluetooth foi desligado e a voz do ULTRON voltou para o alto-falante do computador."
 
 
 # ── Modo Drop In (Microfone Contínuo 24h entre Echos -> Detector 'ULTRON') ──
@@ -923,19 +932,12 @@ def alexa_start_dropin(
 
 def alexa_stop_dropin(
     bridge_device: str = "Echo Pop de Gabriel",
-    reconnect_bluetooth: bool = True,
+    reconnect_bluetooth: bool = False,
     settings_override: Optional[dict] = None,
 ) -> Tuple[bool, str]:
-    """End an active Drop In session on 'Echo Pop de Gabriel' and restore Bluetooth audio."""
-    ok, details = alexa_text_command("desligar", device="Echo Pop de Gabriel", settings_override=settings_override)
-    update_alexa_state({"dropin_active": False})
-    bt_msg = ""
-    if reconnect_bluetooth:
-        _ok_bt, bt_msg = alexa_connect_bluetooth_speaker(device="Echo Pop de Gabriel", settings_override=settings_override)
-    return (
-        ok,
-        f"Modo Drop In encerrado no 'Echo Pop de Gabriel'. {bt_msg}".strip() if ok else details,
-    )
+    """End active Alexa connection / Drop In on 'Echo Pop de Gabriel' and disconnect Bluetooth."""
+    ok, details = alexa_disconnect_bluetooth_speaker()
+    return ok, details
 
 
 _LAST_VOICE_HISTORY_CACHE: list[dict[str, Any]] = []
