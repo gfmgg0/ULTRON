@@ -37,7 +37,10 @@ from typing import Any, Optional, Tuple
 
 import httpx
 
+from core.network import prefer_api_ipv4
 from memory.config_manager import get_plugin_config, save_plugin_config
+
+prefer_api_ipv4()
 
 ROOT = Path(__file__).resolve().parent.parent
 INTEGRATIONS_DIR = ROOT / "config" / "integrations"
@@ -433,14 +436,22 @@ def _execute_alexa_sequence(
         "status": "ENABLED",
     }
     try:
+        import time as _time
         with client:
-            for host in (alexa_host, "pitangui.amazon.com"):
-                resp = client.post(
-                    f"https://{host}/api/behaviors/preview",
-                    json=payload,
-                )
-                if resp.status_code in (200, 201, 202):
-                    return True, "Comando executado com sucesso na Amazon Alexa."
+            for attempt in range(4):
+                for host in (alexa_host, "pitangui.amazon.com"):
+                    resp = client.post(
+                        f"https://{host}/api/behaviors/preview",
+                        json=payload,
+                    )
+                    if resp.status_code in (200, 201, 202):
+                        return True, "Comando executado com sucesso na Amazon Alexa."
+                    if resp.status_code == 429:
+                        break
+                if resp.status_code == 429 and attempt < 3:
+                    _time.sleep(1.8 * (attempt + 1))
+                    continue
+                break
             return False, f"A API da Amazon retornou HTTP {resp.status_code}: {resp.text[:200]}"
     except Exception as exc:
         return False, f"Falha ao enviar comando para a Amazon Alexa: {exc}"
@@ -818,6 +829,109 @@ def alexa_disconnect_bluetooth_speaker() -> Tuple[bool, str]:
         return True, f"Áudio Bluetooth desconectado do '{name}'. A voz do ULTRON voltou para o alto-falante do PC."
     except Exception as exc:
         return False, f"Erro ao desconectar Bluetooth do '{name}': {exc}"
+
+
+# ── Modo Drop In (Microfone Contínuo 24h entre Echos -> Detector 'ULTRON') ──
+def _set_pc_speaker_default(volume_pct: int = 90) -> None:
+    """Set the PC's built-in speaker as the default PipeWire sink during Echo-to-Echo Drop In."""
+    import re as _re
+    import subprocess as _sp
+
+    try:
+        wp = _sp.run(["wpctl", "status"], capture_output=True, text=True, timeout=4)
+        in_sinks = False
+        for line in wp.stdout.splitlines():
+            if "Sinks:" in line:
+                in_sinks = True
+                continue
+            if in_sinks and any(k in line for k in ("Sources:", "Filters:", "Streams:", "Video")):
+                in_sinks = False
+            if in_sinks and ("Speaker" in line or "Headphones" in line) and "Echo" not in line:
+                m = _re.search(r"(\d+)\.\s+", line)
+                if m:
+                    sid = m.group(1)
+                    vol_f = max(0.2, min(1.0, float(volume_pct) / 100.0))
+                    _sp.run(["wpctl", "set-default", sid], check=False, timeout=4)
+                    _sp.run(["wpctl", "set-volume", sid, f"{vol_f:.2f}"], check=False, timeout=4)
+                    break
+    except Exception:
+        pass
+
+
+def alexa_start_dropin(
+    target_device: str = "Echo Dot Sala",
+    bridge_device: str = "Echo Pop de Gabriel",
+    settings_override: Optional[dict] = None,
+) -> Tuple[bool, str]:
+    """
+    Start 'Modo Drop In': opens a continuous bidirectional Drop In audio channel
+    between `bridge_device` (near the PC, e.g. 'Echo Pop de Gabriel') and
+    `target_device` (e.g. 'Echo Dot Sala').
+    - Everything spoken near `target_device` streams continuously (without needing
+      to say 'Alexa'!) out of `bridge_device` into ULTRON's 'Ultron' wake-word
+      detector (`core/wake_word.py`) and Gemini Live!
+    - ULTRON's real voice ('Algenib') plays back and streams across the Drop In
+      channel to `target_device`!
+    """
+    target_dev, err_t = _resolve_echo_device(target_device, settings_override)
+    if target_dev is None:
+        return False, err_t
+    bridge_dev, err_b = _resolve_echo_device(bridge_device, settings_override)
+    if bridge_dev is None:
+        return False, err_b
+
+    target_name = str(target_dev.get("accountName") or target_device).strip()
+    bridge_name = str(bridge_dev.get("accountName") or bridge_device).strip()
+
+    # If the user only specified one Echo (same device), drop in on the other Echo automatically
+    if target_dev.get("serialNumber") == bridge_dev.get("serialNumber"):
+        if "pop" in bridge_name.lower():
+            target_name = "Echo Dot Sala"
+        else:
+            bridge_name = "Echo Pop de Gabriel"
+
+    # Route PC audio output to PC speaker so `bridge_device` mic picks up ULTRON's voice
+    # and transmits it over the Drop In call to `target_device`, while `bridge_device`
+    # speaker plays the room audio from `target_device` into the PC's microphone.
+    _set_pc_speaker_default(90)
+
+    ok, details = alexa_text_command(
+        f"drop in no {target_name}",
+        device=bridge_name,
+        settings_override=settings_override,
+    )
+    if ok:
+        update_alexa_state({
+            "dropin_active": True,
+            "dropin_bridge_device": bridge_name,
+            "dropin_target_device": target_name,
+            "dropin_started_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        })
+        return (
+            True,
+            f"Modo Drop In ativado entre '{bridge_name}' e '{target_name}'! "
+            f"O microfone do '{target_name}' agora está aberto continuamente — basta falar 'Ultron, ...' sem dizer 'Alexa'!",
+        )
+    return False, details
+
+
+def alexa_stop_dropin(
+    bridge_device: str = "Echo Pop de Gabriel",
+    reconnect_bluetooth: bool = True,
+    settings_override: Optional[dict] = None,
+) -> Tuple[bool, str]:
+    """End an active Drop In session and optionally restore Bluetooth audio routing to the Echo."""
+    state = load_alexa_state()
+    b_name = bridge_device or str(state.get("dropin_bridge_device") or "Echo Pop de Gabriel")
+    ok, details = alexa_text_command("desligar", device=b_name, settings_override=settings_override)
+    update_alexa_state({"dropin_active": False})
+    bt_msg = ""
+    if reconnect_bluetooth:
+        _ok_bt, bt_msg = alexa_connect_bluetooth_speaker(device=b_name, settings_override=settings_override)
+    return (
+        ok,
+        f"Modo Drop In encerrado no '{b_name}'. {bt_msg}".strip() if ok else details,
+    )
 
 
 _LAST_VOICE_HISTORY_CACHE: list[dict[str, Any]] = []

@@ -23,7 +23,10 @@ from plugins._alexa_core import (
     alexa_disconnect_bluetooth_speaker,
     alexa_list_routines,
     alexa_set_volume,
+    alexa_set_wake_word,
     alexa_speak,
+    alexa_start_dropin,
+    alexa_stop_dropin,
     alexa_text_command,
     alexa_trigger_routine,
     authenticate_amazon_browser,
@@ -37,16 +40,18 @@ PLUGIN_SETTINGS = ALEXA_PLUGIN_SETTINGS
 PLUGIN = {
     "name": "alexa_control",
     "tier": "core",
-    "brief": "Native Amazon Alexa Brasil control: route ULTRON's voice to Echo via Bluetooth, listen to Echo mic, speak on Echo, run voice commands, and trigger routines.",
+    "brief": "Native Amazon Alexa Brasil control: Drop In continuous mic mode, Bluetooth voice routing, Echo mic listener, TTS, smart home commands, and routines.",
     "description": (
         "Integra o ULTRON diretamente à conta Amazon Alexa Brasil (amazon.com.br) sem precisar de "
-        "nenhuma skill externa: conectar a voz original do ULTRON na Alexa via Bluetooth (connect_bluetooth, "
-        "disconnect_bluetooth), consultar histórico de voz falado no microfone do Echo (voice_history), "
-        "conectar conta Amazon pelo navegador (authenticate), consultar estado (status), listar aparelhos "
-        "Echo (list_devices), fazer o Echo falar qualquer frase em voz alta (speak, announce), enviar "
-        "qualquer comando em português para a Alexa executar na casa inteligente ou música (text_command: "
-        "ex. 'acender luz da sala', 'ligar ar condicionado', 'tocar música'), listar rotinas (list_routines), "
-        "disparar rotina (trigger_routine) e ajustar volume do Echo (volume)."
+        "nenhuma skill externa: iniciar/encerrar Modo Drop In de escuta contínua entre Echos para "
+        "falar 'Ultron' sem dizer 'Alexa' (start_dropin, stop_dropin), conectar a voz original do "
+        "ULTRON na Alexa via Bluetooth (connect_bluetooth, disconnect_bluetooth), consultar histórico "
+        "de voz falado no microfone do Echo (voice_history), alterar wake word física do Echo "
+        "(set_wake_word), conectar conta Amazon pelo navegador (authenticate), consultar estado "
+        "(status), listar aparelhos Echo (list_devices), fazer o Echo falar qualquer frase em voz alta "
+        "(speak, announce), enviar qualquer comando em português para a Alexa executar na casa inteligente "
+        "ou música (text_command: ex. 'acender luz da sala', 'ligar ar condicionado', 'tocar música'), "
+        "listar rotinas (list_routines), disparar rotina (trigger_routine) e ajustar volume do Echo (volume)."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -56,8 +61,11 @@ PLUGIN = {
                 "enum": [
                     "status",
                     "authenticate",
+                    "start_dropin",
+                    "stop_dropin",
                     "connect_bluetooth",
                     "disconnect_bluetooth",
+                    "set_wake_word",
                     "voice_history",
                     "list_devices",
                     "speak",
@@ -110,6 +118,26 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 webhook_endpoint=st["webhook_endpoint"],
                 last_command_from_alexa=st.get("last_command_from_alexa") or "none",
             )
+
+        if action == "start_dropin":
+            target_dev = device or str(params.get("message") or "Echo Dot Sala").strip()
+            ok, details = alexa_start_dropin(target_device=target_dev)
+            if ok:
+                return outcome.done("alexa_start_dropin", target=target_dev, details=details)
+            return outcome.failed("alexa_start_dropin", details)
+
+        if action == "stop_dropin":
+            ok, details = alexa_stop_dropin(bridge_device=device or "Echo Pop de Gabriel")
+            if ok:
+                return outcome.done("alexa_stop_dropin", details=details)
+            return outcome.failed("alexa_stop_dropin", details)
+
+        if action == "set_wake_word":
+            ww = str(params.get("message") or params.get("routine") or "ECHO").strip()
+            ok, details = alexa_set_wake_word(wake_word=ww, device=device)
+            if ok:
+                return outcome.done("alexa_set_wake_word", wake_word=ww, details=details)
+            return outcome.failed("alexa_set_wake_word", details)
 
         if action == "connect_bluetooth":
             lvl = int(params.get("volume_level") if params.get("volume_level") is not None else 85)
