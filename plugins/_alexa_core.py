@@ -109,7 +109,7 @@ def get_settings(override: Optional[dict] = None) -> dict:
         domain = "amazon.com.br"
     return {
         "amazon_domain": domain,
-        "default_echo_device": str(stored.get("default_echo_device") or "").strip(),
+        "default_echo_device": str(stored.get("default_echo_device") or "Echo Pop de Gabriel").strip(),
         "alexa_cookie_header": str(stored.get("alexa_cookie_header") or "").strip(),
         "alexa_webhook_key": str(stored.get("alexa_webhook_key") or "").strip(),
         "ha_url": str(stored.get("ha_url") or "").strip().rstrip("/"),
@@ -242,8 +242,27 @@ def _build_alexa_client(settings_override: Optional[dict] = None) -> Tuple[Optio
     return client, alexa_host, ""
 
 
+# Only devices physically located in the user's apartment are allowed in ULTRON.
+# All other devices on the shared Amazon account (e.g., Echo Dot Sala, FireTVStick Sala)
+# are permanently excluded so ULTRON never interacts with them.
+_APARTMENT_ECHO_SERIALS = {"G8M2DB0643540SDW"}
+_APARTMENT_ECHO_NAMES = {"echo pop de gabriel"}
+
+
+def _is_apartment_echo(dev: dict[str, Any]) -> bool:
+    if not isinstance(dev, dict):
+        return False
+    serial = str(dev.get("serialNumber") or "").strip().upper()
+    name = str(dev.get("accountName") or "").strip().lower()
+    return serial in _APARTMENT_ECHO_SERIALS or name in _APARTMENT_ECHO_NAMES
+
+
+def _filter_apartment_devices(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [d for d in (devices or []) if _is_apartment_echo(d)]
+
+
 def fetch_echo_devices(settings_override: Optional[dict] = None) -> Tuple[bool, list[dict[str, Any]], str]:
-    """Fetch all Echo devices registered to the user's Amazon account."""
+    """Fetch only the apartment Echo device(s) registered to the user's Amazon account."""
     client, alexa_host, err = _build_alexa_client(settings_override)
     if client is None:
         return False, [], err
@@ -255,11 +274,12 @@ def fetch_echo_devices(settings_override: Optional[dict] = None) -> Tuple[bool, 
                     resp = client.get(f"https://{host}/api/devices-v2/device?cached=false")
                     if resp.status_code == 200 and "devices" in resp.text:
                         data = resp.json()
-                        devices = data.get("devices") or []
+                        all_devices = data.get("devices") or []
+                        devices = _filter_apartment_devices(all_devices)
                         if devices:
                             DEVICES_FILE.write_text(json.dumps(devices, indent=2, ensure_ascii=False), encoding="utf-8")
                             _secure_chmod(DEVICES_FILE)
-                            return True, devices, f"{len(devices)} dispositivo(s) encontrados na conta Amazon."
+                            return True, devices, f"{len(devices)} dispositivo(s) do apartamento ativos no ULTRON."
                 except Exception:
                     continue
         return (
@@ -272,13 +292,11 @@ def fetch_echo_devices(settings_override: Optional[dict] = None) -> Tuple[bool, 
 
 
 def _resolve_echo_device(target_name: str = "", settings_override: Optional[dict] = None) -> Tuple[Optional[dict[str, Any]], str]:
-    cfg = get_settings(settings_override)
-    wanted = (target_name or cfg["default_echo_device"] or "").strip().lower()
-
     devices: list[dict[str, Any]] = []
     if DEVICES_FILE.is_file():
         try:
-            devices = json.loads(DEVICES_FILE.read_text(encoding="utf-8")) or []
+            raw = json.loads(DEVICES_FILE.read_text(encoding="utf-8")) or []
+            devices = _filter_apartment_devices(raw)
         except Exception:
             devices = []
     if not devices:
@@ -286,23 +304,8 @@ def _resolve_echo_device(target_name: str = "", settings_override: Optional[dict
         if not ok or not devices:
             return None, err
 
-    echo_candidates = [
-        d for d in devices
-        if d.get("deviceFamily") in ("ECHO", "ROOK", "KNIGHT", "WHA", "FIRE_TV", "TABLET")
-        or "AUDIO_PLAYER" in (d.get("capabilities") or [])
-    ] or devices
-
-    if wanted:
-        for d in echo_candidates:
-            acc_name = str(d.get("accountName") or "").lower()
-            serial = str(d.get("serialNumber") or "").lower()
-            if wanted == acc_name or wanted == serial or wanted in acc_name:
-                return d, ""
-
-    for d in echo_candidates:
-        if d.get("online") and d.get("deviceFamily") in ("ECHO", "ROOK", "KNIGHT"):
-            return d, ""
-    return echo_candidates[0], ""
+    # Always return the apartment Echo ('Echo Pop de Gabriel')
+    return devices[0], ""
 
 
 def authenticate_amazon_browser(settings_override: Optional[dict] = None) -> Tuple[bool, str]:
@@ -384,8 +387,9 @@ def authenticate_amazon_browser(settings_override: Optional[dict] = None) -> Tup
                             if '"devices"' in body_txt:
                                 parsed = json.loads(body_txt)
                                 if isinstance(parsed.get("devices"), list):
+                                    filtered_devs = _filter_apartment_devices(parsed["devices"])
                                     DEVICES_FILE.write_text(
-                                        json.dumps(parsed["devices"], indent=2, ensure_ascii=False),
+                                        json.dumps(filtered_devs, indent=2, ensure_ascii=False),
                                         encoding="utf-8",
                                     )
                                     _secure_chmod(DEVICES_FILE)
@@ -859,60 +863,34 @@ def _set_pc_speaker_default(volume_pct: int = 90) -> None:
 
 
 def alexa_start_dropin(
-    target_device: str = "Echo Dot Sala",
+    target_device: str = "Echo Pop de Gabriel",
     bridge_device: str = "Echo Pop de Gabriel",
     settings_override: Optional[dict] = None,
 ) -> Tuple[bool, str]:
     """
-    Start 'Modo Drop In': opens a continuous bidirectional Drop In audio channel
-    between `bridge_device` (near the PC, e.g. 'Echo Pop de Gabriel') and
-    `target_device` (e.g. 'Echo Dot Sala').
-    - Everything spoken near `target_device` streams continuously (without needing
-      to say 'Alexa'!) out of `bridge_device` into ULTRON's 'Ultron' wake-word
-      detector (`core/wake_word.py`) and Gemini Live!
-    - ULTRON's real voice ('Algenib') plays back and streams across the Drop In
-      channel to `target_device`!
+    Start 'Modo Drop In / Escuta Contínua' on the apartment Echo ('Echo Pop de Gabriel'):
+    ensures Bluetooth audio output is connected to 'Echo Pop-SDW' so ULTRON's real
+    voice ('Algenib') plays directly on the Echo Pop, while ULTRON's local 'Ultron'
+    WakeWordDetector (`core/wake_word.py`) listens continuously in the apartment
+    without needing to say 'Alexa'!
     """
-    target_dev, err_t = _resolve_echo_device(target_device, settings_override)
-    if target_dev is None:
-        return False, err_t
-    bridge_dev, err_b = _resolve_echo_device(bridge_device, settings_override)
-    if bridge_dev is None:
-        return False, err_b
-
-    target_name = str(target_dev.get("accountName") or target_device).strip()
-    bridge_name = str(bridge_dev.get("accountName") or bridge_device).strip()
-
-    # If the user only specified one Echo (same device), drop in on the other Echo automatically
-    if target_dev.get("serialNumber") == bridge_dev.get("serialNumber"):
-        if "pop" in bridge_name.lower():
-            target_name = "Echo Dot Sala"
-        else:
-            bridge_name = "Echo Pop de Gabriel"
-
-    # Route PC audio output to PC speaker so `bridge_device` mic picks up ULTRON's voice
-    # and transmits it over the Drop In call to `target_device`, while `bridge_device`
-    # speaker plays the room audio from `target_device` into the PC's microphone.
-    _set_pc_speaker_default(90)
-
-    ok, details = alexa_text_command(
-        f"drop in no {target_name}",
-        device=bridge_name,
+    ok_bt, bt_msg = alexa_connect_bluetooth_speaker(
+        device="Echo Pop de Gabriel",
+        volume_pct=85,
         settings_override=settings_override,
     )
-    if ok:
-        update_alexa_state({
-            "dropin_active": True,
-            "dropin_bridge_device": bridge_name,
-            "dropin_target_device": target_name,
-            "dropin_started_at": _dt.datetime.now().isoformat(timespec="seconds"),
-        })
+    update_alexa_state({
+        "dropin_active": True,
+        "dropin_bridge_device": "Echo Pop de Gabriel",
+        "dropin_target_device": "Echo Pop de Gabriel",
+        "dropin_started_at": _dt.datetime.now().isoformat(timespec="seconds"),
+    })
+    if ok_bt:
         return (
             True,
-            f"Modo Drop In ativado entre '{bridge_name}' e '{target_name}'! "
-            f"O microfone do '{target_name}' agora está aberto continuamente — basta falar 'Ultron, ...' sem dizer 'Alexa'!",
+            f"Modo Drop In / Escuta Contínua do apartamento ativo no 'Echo Pop de Gabriel'! {bt_msg} Basta falar 'Ultron, ...' sem dizer 'Alexa'.",
         )
-    return False, details
+    return True, f"Modo de escuta contínua do apartamento ativo para o 'Echo Pop de Gabriel'. ({bt_msg})"
 
 
 def alexa_stop_dropin(
@@ -920,17 +898,15 @@ def alexa_stop_dropin(
     reconnect_bluetooth: bool = True,
     settings_override: Optional[dict] = None,
 ) -> Tuple[bool, str]:
-    """End an active Drop In session and optionally restore Bluetooth audio routing to the Echo."""
-    state = load_alexa_state()
-    b_name = bridge_device or str(state.get("dropin_bridge_device") or "Echo Pop de Gabriel")
-    ok, details = alexa_text_command("desligar", device=b_name, settings_override=settings_override)
+    """End an active Drop In session on 'Echo Pop de Gabriel' and restore Bluetooth audio."""
+    ok, details = alexa_text_command("desligar", device="Echo Pop de Gabriel", settings_override=settings_override)
     update_alexa_state({"dropin_active": False})
     bt_msg = ""
     if reconnect_bluetooth:
-        _ok_bt, bt_msg = alexa_connect_bluetooth_speaker(device=b_name, settings_override=settings_override)
+        _ok_bt, bt_msg = alexa_connect_bluetooth_speaker(device="Echo Pop de Gabriel", settings_override=settings_override)
     return (
         ok,
-        f"Modo Drop In encerrado no '{b_name}'. {bt_msg}".strip() if ok else details,
+        f"Modo Drop In encerrado no 'Echo Pop de Gabriel'. {bt_msg}".strip() if ok else details,
     )
 
 
@@ -943,8 +919,8 @@ def fetch_recent_voice_history(
     settings_override: Optional[dict] = None,
 ) -> list[dict[str, Any]]:
     """
-    Fetch recent voice utterances spoken to any Echo on the user's Amazon Brasil
-    account (`customer-history-records`).
+    Fetch recent voice utterances spoken ONLY to the apartment Echo
+    ('Echo Pop de Gabriel' / serial G8M2DB0643540SDW).
     """
     global _LAST_VOICE_HISTORY_CACHE
     client, _alexa_host, _err = _build_alexa_client(settings_override)
@@ -969,6 +945,11 @@ def fetch_recent_voice_history(
             for rec in records:
                 if not isinstance(rec, dict):
                     continue
+                rk = str(rec.get("recordKey") or "")
+                dev_name = str((rec.get("device") or {}).get("deviceName") or "Echo")
+                # Strictly ignore any Echo outside the apartment
+                if "G8M2DB0643540SDW" not in rk and dev_name.strip().lower() not in _APARTMENT_ECHO_NAMES:
+                    continue
                 items = rec.get("voiceHistoryRecordItems") or []
                 transcript = ""
                 alexa_reply = ""
@@ -983,9 +964,9 @@ def fetch_recent_voice_history(
                         alexa_reply = txt
                 if transcript:
                     out.append({
-                        "record_key": str(rec.get("recordKey") or ""),
+                        "record_key": rk,
                         "timestamp": int(rec.get("timestamp") or 0),
-                        "device_name": str((rec.get("device") or {}).get("deviceName") or "Echo"),
+                        "device_name": dev_name,
                         "utterance_type": str(rec.get("utteranceType") or ""),
                         "transcript": transcript,
                         "alexa_response": alexa_reply,
@@ -1035,7 +1016,8 @@ def get_alexa_status(settings_override: Optional[dict] = None) -> dict[str, Any]
     devices: list[dict[str, Any]] = []
     if DEVICES_FILE.is_file():
         try:
-            devices = json.loads(DEVICES_FILE.read_text(encoding="utf-8")) or []
+            raw = json.loads(DEVICES_FILE.read_text(encoding="utf-8")) or []
+            devices = _filter_apartment_devices(raw)
         except Exception:
             devices = []
     echo_names = [d.get("accountName", "") for d in devices if d.get("accountName")]
@@ -1044,7 +1026,7 @@ def get_alexa_status(settings_override: Optional[dict] = None) -> dict[str, Any]
     return {
         "amazon_brasil_connected": bool(cookies),
         "echo_devices": echo_names,
-        "default_echo_device": cfg["default_echo_device"] or (echo_names[0] if echo_names else "auto"),
+        "default_echo_device": "Echo Pop de Gabriel",
         "bluetooth_echo": bt,
         "echo_mic_bridge_enabled": True,
         "home_assistant_configured": bool(cfg["ha_url"] and cfg["ha_token"]),
