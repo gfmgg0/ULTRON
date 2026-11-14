@@ -569,6 +569,52 @@ def alexa_set_volume(
     return False, details
 
 
+def alexa_set_wake_word(
+    wake_word: str = "ECHO",
+    device: str = "",
+    settings_override: Optional[dict] = None,
+) -> Tuple[bool, str]:
+    """
+    Change the physical wake word on an Echo device via Amazon Brasil API.
+    Note: Amazon's Echo firmware chip supports ALEXA, ECHO, AMAZON, COMPUTER.
+    For the wake word 'ULTRON' without saying 'Alexa', ULTRON uses its local
+    Whisper 'Ultron' WakeWordDetector (`core/wake_word.py`) + Bluetooth audio
+    routing to the Echo speaker!
+    """
+    dev, err = _resolve_echo_device(device, settings_override)
+    if dev is None:
+        return False, err
+    w = (wake_word or "ECHO").strip().upper()
+    if w not in ("ALEXA", "ECHO", "AMAZON", "COMPUTER"):
+        return (
+            False,
+            f"O chip interno da Amazon só aceita ALEXA, ECHO, AMAZON ou COMPUTER no hardware do Echo. "
+            f"A palavra de ativação 'ULTRON' já está ativa diretamente pelo detector de voz do ULTRON + saída Bluetooth no seu Echo!",
+        )
+    client, alexa_host, err = _build_alexa_client(settings_override)
+    if client is None:
+        return False, err
+    payload = {
+        "wakeWords": [
+            {
+                "active": True,
+                "deviceSerialNumber": dev.get("serialNumber"),
+                "deviceType": dev.get("deviceType"),
+                "midFieldState": None,
+                "wakeWord": w,
+            }
+        ]
+    }
+    try:
+        with client:
+            resp = client.put(f"https://{alexa_host}/api/wake-word", json=payload)
+            if resp.status_code in (200, 202, 204):
+                return True, f"Palavra de ativação física do '{dev.get('accountName', 'Echo')}' alterada para '{w}'."
+            return False, f"A Amazon retornou HTTP {resp.status_code}: {resp.text[:200]}"
+    except Exception as exc:
+        return False, f"Erro ao alterar wake word do Echo: {exc}"
+
+
 def alexa_list_routines(settings_override: Optional[dict] = None) -> Tuple[bool, list[dict[str, Any]], str]:
     """Fetch user's configured Alexa Routines from Amazon Brasil."""
     client, alexa_host, err = _build_alexa_client(settings_override)
