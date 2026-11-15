@@ -1206,7 +1206,10 @@ class JarvisLive:
             f"LISTENING & CONTROL RULES:\n"
             f"- Your microphone is continuously OPEN and listening directly to the user (no wake word needed). Answer naturally whenever spoken to.\n"
             f"- Whenever the user asks to disconnect from Alexa ('desconecte da Alexa', 'desconectar da Alexa', 'sair da Alexa', 'desligar Alexa'), immediately call `alexa_control` with `action='disconnect_bluetooth'`.\n"
-            f"- Whenever the user asks to connect to Alexa ('conecte na Alexa', 'usar a Alexa'), call `alexa_control` with `action='connect_bluetooth'`.\n\n"
+            f"- Whenever the user asks to connect to Alexa ('conecte na Alexa', 'usar a Alexa'), call `alexa_control` with `action='connect_bluetooth'`.\n"
+            f"SELF-CODE MODIFICATION RULES:\n"
+            f"- Whenever the user asks you to modify, rewrite, improve, fix, or add features to YOUR OWN code or files (e.g. 'altere seu código', 'mude seu código', 'adicione uma função no seu sistema', 'peça ao Antigravity para modificar...', 'altere o arquivo X'), you MUST call the tool `modify_self_code`.\n"
+            f"- Inform the user that you are consulting your software engineer (Antigravity) to apply the code changes, and then report the outcome to the user.\n\n"
         )
 
         # Everything the model is told about *itself* is derived here, not
