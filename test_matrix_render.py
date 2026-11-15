@@ -26,14 +26,14 @@ def render_preview():
     cx, cy = w / 2, h / 2
     r = min(w, h) * 0.38
     
-    main = QColor("#ffaa00")
-    acc = QColor("#ff6600")
+    main = QColor("#922747")
+    acc = QColor("#c4335c")
     bg = QColor("#030306")
     
     sphere.paint(
         p, cx, cy, r, w, h,
         main=main, acc=acc, bg=bg,
-        name="J.A.R.V.I.S", state="SPEAKING",
+        name="ULTRON", state="SPEAKING",
         speaking=True, muted=False
     )
     

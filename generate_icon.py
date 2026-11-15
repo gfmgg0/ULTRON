@@ -26,8 +26,8 @@ def render_icon():
     cx, cy = w / 2, h / 2
     r = 100
     
-    main = QColor("#ff1744")
-    acc = QColor("#d50000")
+    main = QColor("#922747")
+    acc = QColor("#c4335c")
     bg = QColor("#08080c")
     
     sphere.paint(
