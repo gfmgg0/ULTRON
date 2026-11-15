@@ -627,7 +627,7 @@ class HudCanvas(QWidget):
         # starts talking. Same lesson the head's sway taught.
         self._core_phase += min(0.10, max(0.0, dt))
 
-        if self._matrix is not None and self.hud_style == "matrix":
+        if self._matrix is not None and self.hud_style in ("matrix", "core"):
             self._matrix.step(dt, amp, speaking=self.speaking,
                               muted=self.muted, state=self.state)
         elif self._avatar is not None and self.hud_style == "face":
@@ -904,7 +904,7 @@ class HudCanvas(QWidget):
             else:
                 _acc = qcol(C.PRI)
 
-        if self._matrix is not None and self.hud_style == "matrix":
+        if self._matrix is not None and self.hud_style in ("matrix", "core"):
             self._matrix.paint(p, cx, _band_t + _band_h / 2.0, _r * 0.88, W, _band_h,
                                main=_main, acc=_acc, bg=qcol(C.BG),
                                name=self._assistant_name, state=self.state,
