@@ -62,7 +62,7 @@ PERSONA_ULTRON = {
 
 PERSONA_FRIDAY = {
     "name": "FRIDAY",
-    "voice": "Aoede",
+    "voice": "Kore",
     "color": "#8a2be2",
     "address": "Senhor",
     "subtitle": "Female Replacement Intelligent Digital Assistant Youth",

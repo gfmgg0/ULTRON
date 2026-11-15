@@ -6677,7 +6677,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._log.append_log(f"ERR: Config save failed — {e}")
 
-        if (force_reconnect or voice_changed or name_changed) and self.on_voice_change:
+        if force_reconnect and self.on_voice_change:
             self.on_voice_change()
 
     def _centre_overlay(self, ov) -> None:
@@ -7187,9 +7187,9 @@ class JarvisUI:
     def assistant_name(self) -> str:
         return self._win._assistant_name
 
-    def apply_assistant_switch(self, name: str, user_name: str = "", ui_color: str = "", voice: str = "") -> None:
+    def apply_assistant_switch(self, name: str, user_name: str = "", ui_color: str = "", voice: str = "", force_reconnect: bool = False) -> None:
         """Thread-safe: Switch the assistant identity, theme color, and voice across UI and config."""
-        self._win._name_update_sig.emit(str(name), str(user_name), str(ui_color), str(voice), True)
+        self._win._name_update_sig.emit(str(name), str(user_name), str(ui_color), str(voice), force_reconnect)
 
     def start_speaking(self):
         self.set_state("SPEAKING")

@@ -1,7 +1,7 @@
 """
 Action to switch active assistant persona between ULTRON and FRIDAY.
 - ULTRON: Mature low-register masculine voice ('Charon'), wine-red matrix (#922747), tactical/direct, addresses user as 'Chefe'.
-- FRIDAY: Erudite cultured lady in her 40s-50s ('Aoede'), royal purple matrix (#8a2be2), dignified/articulate, addresses user as 'Senhor'.
+- FRIDAY: Erudite cultured lady in her 40s-50s ('Kore'), royal purple matrix (#8a2be2), dignified/articulate, addresses user as 'Senhor'.
 """
 from __future__ import annotations
 

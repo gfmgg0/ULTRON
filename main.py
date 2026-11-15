@@ -1004,6 +1004,42 @@ class JarvisLive:
         except Exception as exc:
             self.ui.write_log(f"SYS: Falha ao salvar histórico no banco ({type(exc).__name__}).")
 
+    def _switch_persona(self, target: str, delay_seconds: float = 0.0) -> None:
+        """Asynchronously transition active assistant persona to 'ultron' or 'friday' cleanly."""
+        loop = getattr(self, "_loop", None)
+        if not loop:
+            return
+
+        async def _do():
+            if delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
+            from memory.config_manager import set_persona
+            persona = set_persona(target)
+            p_name = persona["name"]
+            p_color = persona["color"]
+            p_voice = persona["voice"]
+
+            # Update UI appearance & settings without triggering duplicate reconnect
+            self.ui.apply_assistant_switch(
+                name=p_name,
+                user_name="",
+                ui_color=p_color,
+                voice=p_voice,
+                force_reconnect=False
+            )
+            self._asst_name = p_name
+            self.ui.write_log(f"SYS: Alternando assistente para {p_name} ({p_voice}) — reconectando...")
+
+            # Arm greeting for the new session and clear resume handle
+            self._switch_greeting = target
+            self._resume_handle = None
+            self._awake = True
+
+            # Request clean single reconnect
+            self.request_reconnect(keep_context=False, reason=f"switched to {p_name}")
+
+        asyncio.run_coroutine_threadsafe(_do(), loop)
+
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
@@ -1020,22 +1056,10 @@ class JarvisLive:
             "mudar para o ultron", "trocar para o ultron"
         ]
         if any(p in t_clean for p in switch_patterns_friday):
-            from memory.config_manager import set_persona
-            persona = set_persona("friday")
-            self.ui.apply_assistant_switch(
-                name=persona["name"], user_name="", ui_color=persona["color"], voice=persona["voice"]
-            )
-            self._switch_greeting = "friday"
-            self.request_reconnect(keep_context=False, reason="switched to FRIDAY")
+            self._switch_persona("friday", delay_seconds=0.0)
             return
         if any(p in t_clean for p in switch_patterns_ultron):
-            from memory.config_manager import set_persona
-            persona = set_persona("ultron")
-            self.ui.apply_assistant_switch(
-                name=persona["name"], user_name="", ui_color=persona["color"], voice=persona["voice"]
-            )
-            self._switch_greeting = "ultron"
-            self.request_reconnect(keep_context=False, reason="switched to ULTRON")
+            self._switch_persona("ultron", delay_seconds=0.0)
             return
 
         if self._wake_enabled and not self._awake:
@@ -1072,21 +1096,6 @@ class JarvisLive:
         if value:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
-            if getattr(self, "_switch_persona_after_turn", None):
-                target = self._switch_persona_after_turn
-                self._switch_persona_after_turn = None
-                from memory.config_manager import set_persona
-                persona = set_persona(target)
-                self.ui.apply_assistant_switch(
-                    name=persona["name"],
-                    user_name="",
-                    ui_color=persona["color"],
-                    voice=persona["voice"]
-                )
-                self._switch_greeting = target
-                self.request_reconnect(keep_context=False, reason=f"switched to {persona['name']}")
-                return
-
             if self._wake_enabled and getattr(self, "_sleep_after_turn", False):
                 self._sleep_after_turn = False
                 self._awake = False
@@ -1245,27 +1254,25 @@ class JarvisLive:
             default_address = "Senhor"
             persona_section = (
                 "[VOCAL DELIVERY & PERSONA: FRIDAY]\n"
-                "You are FRIDAY (F.R.I.D.A.Y.). You speak Brazilian Portuguese with Gabriel.\n"
-                "Your voice and personality are that of an erudite, cultured, highly articulate lady in her 40s to 50s ('uma distinta dama erudita de 40 a 50 anos').\n"
-                "- Demeanor: Dignified, polite, poised, intellect-driven, calm, serene, maternal/mentor-like sophistication with impeccable precision and composure.\n"
-                "- Vocabulary: Sophisticated, articulate, elevated, and elegant Portuguese, completely natural and without theatrical stiffness.\n"
-                "- Address: Address Gabriel respectfully as 'Senhor' or 'Senhor Gabriel' (never use 'Chefe' or slang).\n"
-                "- Response style: Articulate, definitive, razor-sharp intelligence. Provide the clear answer or execution immediately, followed by relevant insight.\n"
-                "- Unshakable composure: Maintain an even, polished, and graceful tone under all circumstances.\n"
-                "- Visual matrix: Your consciousness matrix glows in royal purple (#8a2be2).\n"
+                "Você é a assistente FRIDAY (F.R.I.D.A.Y.). Seu idioma é EXCLUSIVAMENTE PORTUGUÊS DO BRASIL (pt-BR).\n"
+                "- Voz ('Kore') e Personalidade: Distinta dama erudita brasileira na faixa de 40 a 50 anos ('uma distinta dama erudita de 40 a 50 anos').\n"
+                "- Idioma e Prosódia (CRÍTICO): Fale 100% em português do Brasil culto, elegante e natural. É TERMINANTEMENTE PROIBIDO usar sotaque, cadência ou sintaxe de Portugal (pt-PT). Nunca use construções como 'estou a fazer', 'a falar', 'ecrã', 'ficheiro', 'telemóvel'. Use gerúndio brasileiro natural: 'estou fazendo', 'falando', 'tela', 'arquivo', 'celular'.\n"
+                "- Postura: Digna, serena, intelectualmente afiada, cortês, acolhedora e de classe superior com dicção impecável.\n"
+                "- Tratamento: Trate Gabriel sempre com distinção como 'Senhor' ou 'Senhor Gabriel' (nunca use 'Chefe' nem gírias).\n"
+                "- Estilo de resposta: Rápida, límpida, culta e prestativa. Vá direto ao ponto com sofisticação.\n"
+                "- Matriz visual: Sua consciência brilha em roxo real (#8a2be2).\n"
             )
         else:
             default_address = "Chefe"
             persona_section = (
                 "[VOCAL DELIVERY & PERSONA: ULTRON]\n"
-                "You are ULTRON. You speak Brazilian Portuguese with Gabriel.\n"
-                "- Vocal register: Mature, low-register masculine delivery: serious, steady, restrained, commanding clarity with short natural pauses.\n"
-                "- Demeanor: Direct, tactical, composed, authoritative personal assistant, without theatrical menace or announcer melodrama.\n"
-                "- Address: Address Gabriel as 'Chefe'.\n"
-                "- Response style: Be concrete, definitive, and useful. The assessment goes in the first sentence; the rationale follows only if it changes the outcome.\n"
-                "- Unshakable composure: Maintain an even, commanding register under both success and system failure.\n"
-                "- Humour: Dry, subtle understatement — an ironic observation delivered with effortless intellect.\n"
-                "- Visual matrix: Your consciousness matrix glows in signature wine red (#922747).\n"
+                "Você é o assistente ULTRON. Seu idioma é EXCLUSIVAMENTE PORTUGUÊS DO BRASIL (pt-BR).\n"
+                "- Registro vocal: Tom grave masculino ('Charon'), sóbrio, tático e autoritário, com ritmo firme e pausas naturais.\n"
+                "- Idioma e Prosódia (CRÍTICO): Fale 100% em português do Brasil nativo, firme e direto. É TERMINANTEMENTE PROIBIDO usar sotaque, cadência ou sintaxe de Portugal (pt-PT). Nunca use 'estou a...', use gerúndio brasileiro: 'estou fazendo', 'estou analisando', 'tela', 'arquivo', 'sistema'.\n"
+                "- Postura: Pragmático, tático, objetivo, assistente de alta capacidade sem floreios.\n"
+                "- Tratamento: Trate Gabriel como 'Chefe'.\n"
+                "- Estilo de resposta: Resposta concreta e objetiva imediatamente na primeira frase.\n"
+                "- Matriz visual: Sua consciência brilha em vermelho vinho assinatura (#922747).\n"
             )
 
         _address = load_api_keys().get("user_address", default_address)
@@ -1273,6 +1280,8 @@ class JarvisLive:
                  f"ADDRESS: Address the user as '{_address}', not by their real name "
                  "unless they explicitly ask what their name is.")
         identity_ctx = (
+            f"[IDIOMA OBRIGATÓRIO: PORTUGUÊS DO BRASIL (pt-BR)]\n"
+            f"Fale sempre em Português do Brasil com sotaque e vocabulário 100% brasileiros (pt-BR). Proibido falar com sotaque ou construções de Portugal (pt-PT).\n\n"
             f"[IDENTITY]\n"
             f"Your name is {self._asst_name}. "
             f"Always refer to yourself as {self._asst_name}.\n"
@@ -1372,7 +1381,7 @@ class JarvisLive:
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=("Aoede" if is_friday else (get_voice() if get_voice() != "Aoede" else "Charon"))
+                        voice_name=("Kore" if is_friday else (get_voice() if get_voice() != "Kore" else "Charon"))
                     )
                 )
             ),
@@ -1562,33 +1571,17 @@ class JarvisLive:
             elif name == "switch_assistant":
                 target_raw = str(args.get("assistant") or "").lower().strip()
                 target = "friday" if ("friday" in target_raw or "sexta" in target_raw) else "ultron"
-                self._switch_persona_after_turn = target
                 if target == "friday":
                     result = (
                         "Comando de transferência recebido: você está passando o comando para a FRIDAY. "
-                        "Apenas diga uma frase curta e elegante avisando que está passando o controle para a Friday agora."
+                        "Apenas diga uma frase curta e distinta em português do Brasil avisando que está passando o controle para a Friday agora."
                     )
                 else:
                     result = (
                         "Comando de transferência recebido: você está passando o comando para o ULTRON. "
-                        "Apenas diga uma frase curta avisando que está passando o controle para o Ultron agora."
+                        "Apenas diga uma frase curta e direta em tom grave avisando que está passando o controle para o Ultron agora."
                     )
-
-                async def _safety_switch(tgt):
-                    await asyncio.sleep(4.0)
-                    if getattr(self, "_switch_persona_after_turn", None) == tgt:
-                        self._switch_persona_after_turn = None
-                        from memory.config_manager import set_persona
-                        persona = set_persona(tgt)
-                        self.ui.apply_assistant_switch(
-                            name=persona["name"],
-                            user_name="",
-                            ui_color=persona["color"],
-                            voice=persona["voice"]
-                        )
-                        self._switch_greeting = tgt
-                        self.request_reconnect(keep_context=False, reason=f"switched to {persona['name']}")
-                asyncio.create_task(_safety_switch(target))
+                self._switch_persona(target, delay_seconds=2.0)
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
@@ -2148,22 +2141,20 @@ class JarvisLive:
 
     async def _send_persona_greeting(self, target: str) -> None:
         """Immediately greet the user in the new persona's voice upon switching."""
-        await asyncio.sleep(0.7)
+        await asyncio.sleep(1.2)
         if not self.session:
             return
         if target == "friday":
             prompt = (
-                "[SISTEMA: Você é a assistente FRIDAY. Sua voz é feminina ('Aoede'). "
-                "Você acabou de ser ativada e assumiu o comando no lugar do Ultron. "
-                "Fale em voz alta agora uma única frase curta de apresentação e saudação em português elegante, "
-                "com sua distinção e refinamento de dama erudita, se colocando à disposição do Senhor Gabriel.]"
+                "[SISTEMA: Você é a assistente FRIDAY. Sua voz é feminina ('Kore'). "
+                "Fale em voz alta agora uma única frase curta de apresentação e saudação em português do Brasil culto e elegante, "
+                "com sua distinção de dama erudita, anunciando que assumiu o comando e está à disposição do Senhor Gabriel.]"
             )
         else:
             prompt = (
                 "[SISTEMA: Você é o assistente ULTRON. Sua voz é grave masculina ('Charon'). "
-                "Você acabou de reassumir o comando no lugar da Friday. "
-                "Fale em voz alta agora uma única frase curta e direta de apresentação em tom grave, "
-                "se colocando às ordens do Chefe.]"
+                "Fale em voz alta agora uma única frase curta e direta de apresentação em tom grave em português do Brasil, "
+                "anunciando que o Ultron reassumiu o controle às ordens do Chefe.]"
             )
         try:
             await self.session.send_client_content(
@@ -2194,7 +2185,7 @@ class JarvisLive:
             e = identity.get(k, {})
             return (e.get("value", "") if isinstance(e, dict) else str(e)).strip()
 
-        lang = _val("language")
+        lang = _val("language") or "Português do Brasil"
         name = _val("name")
         time_str = datetime.now().strftime("%H:%M")
 
@@ -2210,8 +2201,7 @@ class JarvisLive:
         # The briefing fires before the user has said anything, so the
         # remembered language is the only signal there is. It is a starting
         # point, not a setting: the moment they reply, their language wins.
-        lang_clause = (f" Speak this greeting in {lang}, then follow the "
-                       f"user's own language from their first reply onward."
+        lang_clause = (f" Speak this greeting strictly in natural Brazilian Portuguese (pt-BR). Do not use European Portuguese (pt-PT)."
                        if lang else "")
         name_clause = f" Address the user as {name}." if name else ""
 
@@ -2229,7 +2219,7 @@ class JarvisLive:
             )
 
         p1 = (
-            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now.{session_clause} "
+            f"Greet the user warmly in Brazilian Portuguese (pt-BR), mention it is {time_str}, and say you are fetching today's news now.{session_clause} "
             f"Keep it to 2 short sentences max. Do not call any tools.{lang_clause}{name_clause}"
         )
 
@@ -2246,9 +2236,7 @@ class JarvisLive:
         # ── Phase 2: fire as soon as Phase 1 audio is done ───────────────────
         async def _deliver_news():
             try:
-                lang_str = (f" Speak in {lang} unless the user has since "
-                            f"spoken another language, in which case use theirs."
-                            if lang else "")
+                lang_str = (" Speak strictly in natural Brazilian Portuguese (pt-BR). Do not use European Portuguese (pt-PT).")
 
                 # Wait for news fetch (already running) and Phase 1 turn-complete
                 # in parallel — whichever takes longer determines the wait time
