@@ -51,6 +51,56 @@ def is_configured() -> bool:
     return bool(key and len(key) > 15)
 
 
+# ── Assistant Personas (Ultron & Friday) ──────────────────────────────────
+PERSONA_ULTRON = {
+    "name": "ULTRON",
+    "voice": "Charon",
+    "color": "#922747",
+    "address": "Chefe",
+    "subtitle": "Artificial Intelligence Matrix Core",
+}
+
+PERSONA_FRIDAY = {
+    "name": "FRIDAY",
+    "voice": "Aoede",
+    "color": "#8a2be2",
+    "address": "Senhor",
+    "subtitle": "Female Replacement Intelligent Digital Assistant Youth",
+}
+
+AVAILABLE_PERSONAS = {
+    "ultron": PERSONA_ULTRON,
+    "friday": PERSONA_FRIDAY,
+}
+
+
+def get_persona(name: str | None = None) -> dict:
+    """Return persona dict for either 'friday' or 'ultron'."""
+    if not name:
+        name = get_assistant_name()
+    key = "friday" if "friday" in (name or "").lower() else "ultron"
+    return AVAILABLE_PERSONAS[key]
+
+
+def set_persona(target: str) -> dict:
+    """Persist persona settings (assistant_name, voice_name, ui_color, user_address) to config."""
+    key = "friday" if "friday" in (target or "").lower() else "ultron"
+    p = AVAILABLE_PERSONAS[key]
+    ensure_config_dir()
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["assistant_name"] = p["name"]
+    data["voice_name"] = p["voice"]
+    data["ui_color"] = p["color"]
+    data["user_address"] = p["address"]
+    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+    return p
+
+
 def get_assistant_name() -> str:
     """Return the configured assistant name, or 'JARVIS' if not set."""
     return load_api_keys().get("assistant_name", "JARVIS") or "JARVIS"

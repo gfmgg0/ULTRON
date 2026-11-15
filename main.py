@@ -1007,6 +1007,27 @@ class JarvisLive:
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
+        t_clean = (text or "").lower().strip()
+        switch_patterns_friday = [
+            "mudar para friday", "trocar para friday", "chamar friday", "chame a friday",
+            "ativar friday", "friday assuma", "ativa a friday", "chama a friday",
+            "mudar para a friday", "trocar para a friday"
+        ]
+        switch_patterns_ultron = [
+            "mudar para ultron", "trocar para ultron", "chamar ultron", "chame o ultron",
+            "ativar ultron", "ultron assuma", "ativa o ultron", "chama o ultron",
+            "voltar para ultron", "volte para o ultron", "voltar pro ultron",
+            "mudar para o ultron", "trocar para o ultron"
+        ]
+        if any(p in t_clean for p in switch_patterns_friday):
+            from actions.switch_assistant import switch_assistant
+            switch_assistant({"assistant": "friday"}, player=self.ui, speak=self.speak)
+            return
+        if any(p in t_clean for p in switch_patterns_ultron):
+            from actions.switch_assistant import switch_assistant
+            switch_assistant({"assistant": "ultron"}, player=self.ui, speak=self.speak)
+            return
+
         if self._wake_enabled and not self._awake:
             self.wake(reason="comando digitado")
         session = self.session
@@ -1194,7 +1215,35 @@ class JarvisLive:
         # Address form is a property of the language being spoken, so it is
         # stated as a principle rather than a two-language lookup — the model
         # already knows the respectful register of whatever language it is in.
-        _address = load_api_keys().get("user_address", _user_name or "Chefe")
+        is_friday = "friday" in self._asst_name.lower()
+        if is_friday:
+            default_address = "Senhor"
+            persona_section = (
+                "[VOCAL DELIVERY & PERSONA: FRIDAY]\n"
+                "You are FRIDAY (F.R.I.D.A.Y.). You speak Brazilian Portuguese with Gabriel.\n"
+                "Your voice and personality are that of an erudite, cultured, highly articulate lady in her 40s to 50s ('uma distinta dama erudita de 40 a 50 anos').\n"
+                "- Demeanor: Dignified, polite, poised, intellect-driven, calm, serene, maternal/mentor-like sophistication with impeccable precision and composure.\n"
+                "- Vocabulary: Sophisticated, articulate, elevated, and elegant Portuguese, completely natural and without theatrical stiffness.\n"
+                "- Address: Address Gabriel respectfully as 'Senhor' or 'Senhor Gabriel' (never use 'Chefe' or slang).\n"
+                "- Response style: Articulate, definitive, razor-sharp intelligence. Provide the clear answer or execution immediately, followed by relevant insight.\n"
+                "- Unshakable composure: Maintain an even, polished, and graceful tone under all circumstances.\n"
+                "- Visual matrix: Your consciousness matrix glows in royal purple (#8a2be2).\n"
+            )
+        else:
+            default_address = "Chefe"
+            persona_section = (
+                "[VOCAL DELIVERY & PERSONA: ULTRON]\n"
+                "You are ULTRON. You speak Brazilian Portuguese with Gabriel.\n"
+                "- Vocal register: Mature, low-register masculine delivery: serious, steady, restrained, commanding clarity with short natural pauses.\n"
+                "- Demeanor: Direct, tactical, composed, authoritative personal assistant, without theatrical menace or announcer melodrama.\n"
+                "- Address: Address Gabriel as 'Chefe'.\n"
+                "- Response style: Be concrete, definitive, and useful. The assessment goes in the first sentence; the rationale follows only if it changes the outcome.\n"
+                "- Unshakable composure: Maintain an even, commanding register under both success and system failure.\n"
+                "- Humour: Dry, subtle understatement — an ironic observation delivered with effortless intellect.\n"
+                "- Visual matrix: Your consciousness matrix glows in signature wine red (#922747).\n"
+            )
+
+        _address = load_api_keys().get("user_address", default_address)
         _addr = (f"USER IDENTITY: The user's real name is {_user_name or 'Gabriel'}. "
                  f"ADDRESS: Address the user as '{_address}', not by their real name "
                  "unless they explicitly ask what their name is.")
@@ -1207,6 +1256,9 @@ class JarvisLive:
             f"- Your microphone is continuously OPEN and listening directly to the user (no wake word needed). Answer naturally whenever spoken to.\n"
             f"- Whenever the user asks to disconnect from Alexa ('desconecte da Alexa', 'desconectar da Alexa', 'sair da Alexa', 'desligar Alexa'), immediately call `alexa_control` with `action='disconnect_bluetooth'`.\n"
             f"- Whenever the user asks to connect to Alexa ('conecte na Alexa', 'usar a Alexa'), call `alexa_control` with `action='connect_bluetooth'`.\n"
+            f"ASSISTANT SWITCHING RULES:\n"
+            f"- Whenever the user asks to switch, change to, or call FRIDAY (e.g. 'mudar para Friday', 'chame a Friday', 'Friday assuma', 'trocar para Friday', 'ative a Friday'), call the tool `switch_assistant` with `assistant='friday'`.\n"
+            f"- Whenever the user asks to switch, change to, or call ULTRON (e.g. 'mudar para Ultron', 'chame o Ultron', 'Ultron assuma', 'trocar para Ultron', 'volte para o Ultron'), call the tool `switch_assistant` with `assistant='ultron'`.\n"
             f"SELF-CODE MODIFICATION RULES:\n"
             f"- Whenever the user asks you to modify, rewrite, improve, fix, or add features to YOUR OWN code or files (e.g. 'altere seu código', 'mude seu código', 'adicione uma função no seu sistema', 'peça ao Antigravity para modificar...', 'altere o arquivo X'), you MUST call the tool `modify_self_code`.\n"
             f"- Inform the user that you are consulting your software engineer (Antigravity) to apply the code changes, and then report the outcome to the user.\n\n"
@@ -1250,6 +1302,7 @@ class JarvisLive:
                   for d in _all_decls}
         sys_prompt = _render_prompt(sys_prompt, {
             "assistant_name": self._asst_name,
+            "persona_section": persona_section,
             "platform": f"{_platform.system()} {_platform.release()}".strip(),
             "capabilities": _describe_tools(_all_decls),
             "limits": _describe_limits(

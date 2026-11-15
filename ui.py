@@ -4296,9 +4296,11 @@ class MainWindow(QMainWindow):
     _quiz_sig       = pyqtSignal(str, object, object)  # (topic, questions, grader)
     _quiz_hide_sig  = pyqtSignal()
     _review_sig     = pyqtSignal(str, str, object, object)  # document review payload
+    _name_update_sig = pyqtSignal(str, str, str, str)  # (name, user_name, ui_color, voice)
 
     def __init__(self, face_path: str):
         super().__init__()
+        self._name_update_sig.connect(self._apply_name_update)
         self._face_path = face_path
         self._hologram_window = None
 
@@ -6625,6 +6627,10 @@ class MainWindow(QMainWindow):
         self._title_lbl.setText(display)
         if display in ("JARVIS", "J.A.R.V.I.S"):
             self._sub_lbl.setText("Just A Rather Very Intelligent System")
+        elif "FRIDAY" in display:
+            self._sub_lbl.setText("Female Replacement Intelligent Digital Assistant Youth")
+        elif "ULTRON" in display:
+            self._sub_lbl.setText("Artificial Intelligence Matrix Core")
         else:
             self._sub_lbl.setText("Personal AI Assistant")
         self._log._ai_name_lc = self._assistant_name.lower()
@@ -6663,7 +6669,7 @@ class MainWindow(QMainWindow):
             self._log.append_log(f"ERR: Config save failed — {e}")
 
         if voice_changed and self.on_voice_change:
-            self.on_voice_change()
+            QTimer.singleShot(1800, self.on_voice_change)
 
     def _centre_overlay(self, ov) -> None:
         """Place a floating overlay in the middle of the HUD and show it."""
@@ -7171,6 +7177,10 @@ class JarvisUI:
     @property
     def assistant_name(self) -> str:
         return self._win._assistant_name
+
+    def apply_assistant_switch(self, name: str, user_name: str = "", ui_color: str = "", voice: str = "") -> None:
+        """Thread-safe: Switch the assistant identity, theme color, and voice across UI and config."""
+        self._win._name_update_sig.emit(str(name), str(user_name), str(ui_color), str(voice))
 
     def start_speaking(self):
         self.set_state("SPEAKING")
