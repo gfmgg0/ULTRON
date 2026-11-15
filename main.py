@@ -741,12 +741,11 @@ class JarvisLive:
 
         # ── Wake word ────────────────────────────────────────────────────────
         # _awake gates the mic (see _listen_audio) and the background speakers.
-        # Wake word 'Ultron' activates listening, and ULTRON stays awake until
-        # the user tells him to rest ('descansar') or thanks him ('obrigado').
+        # Wake word is disabled: ULTRON listens continuously with open mic.
         self._quiet_mode = bool(load_api_keys().get("quiet_mode", False))
-        self._wake_enabled     = True
-        save_wake_word_enabled(True)
-        self._awake            = False
+        self._wake_enabled     = False
+        save_wake_word_enabled(False)
+        self._awake            = True
         self._sleep_after_turn = False
         self._wake_preroll: collections.deque[bytes] = collections.deque(maxlen=65)
         self._wake_detector: WakeWordDetector | None = None
@@ -1042,7 +1041,7 @@ class JarvisLive:
         if value:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
-            if getattr(self, "_sleep_after_turn", False):
+            if self._wake_enabled and getattr(self, "_sleep_after_turn", False):
                 self._sleep_after_turn = False
                 self._awake = False
                 self._wake_preroll.clear()
@@ -1050,6 +1049,7 @@ class JarvisLive:
                 self.ui.set_state("SLEEPING")
                 self.ui.write_log("SYS: Modo de descanso ativo — diga 'Ultron' para ligar a escuta novamente.")
             else:
+                self._sleep_after_turn = False
                 self.ui.set_state(
                     "SLEEPING" if (self._wake_enabled and not self._awake) else "LISTENING"
                 )
@@ -1203,9 +1203,8 @@ class JarvisLive:
             f"Your name is {self._asst_name}. "
             f"Always refer to yourself as {self._asst_name}.\n"
             f"{_addr}\n"
-            f"WAKE WORD & STANDBY RULES:\n"
-            f"- Your active listening is turned ON by the wake word 'Ultron' and stays ON continuously until the user explicitly tells you to rest ('pode descansar', 'descanse', 'descansar', 'dormir', 'dispensado', 'modo de espera', 'parar de ouvir') OR thanks you ('obrigado', 'muito obrigado', 'valeu', 'agradeço', 'tchau', 'até logo').\n"
-            f"- Whenever the user tells you to rest or thanks you, call the tool `standby_ultron` and reply briefly (e.g., 'À disposição, Chefe. Entrando em modo de descanso.').\n"
+            f"LISTENING & CONTROL RULES:\n"
+            f"- Your microphone is continuously OPEN and listening directly to the user (no wake word needed). Answer naturally whenever spoken to.\n"
             f"- Whenever the user asks to disconnect from Alexa ('desconecte da Alexa', 'desconectar da Alexa', 'sair da Alexa', 'desligar Alexa'), immediately call `alexa_control` with `action='disconnect_bluetooth'`.\n"
             f"- Whenever the user asks to connect to Alexa ('conecte na Alexa', 'usar a Alexa'), call `alexa_control` with `action='connect_bluetooth'`.\n\n"
         )
@@ -1825,7 +1824,7 @@ class JarvisLive:
                                     from plugins._alexa_core import alexa_connect_bluetooth_speaker as _ax_conn
                                     asyncio.create_task(asyncio.to_thread(_ax_conn, "Echo Pop de Gabriel", 85))
                                 # Detect voice request to rest ('descansar') or thank-you ('obrigado' / 'valeu')
-                                if _SLEEP_COMMAND_RE.search(full_in):
+                                if self._wake_enabled and _SLEEP_COMMAND_RE.search(full_in):
                                     self._sleep_after_turn = True
                                     print(f"[Wake] Comando de descanso/agradecimento detectado em \"{full_in}\" — desligando escuta após resposta.")
                             in_buf = []
@@ -2636,17 +2635,19 @@ class JarvisLive:
                         # is the whole point, and it is invisible otherwise.
                         self.ui.write_log("SYS: Reconnected — conversation restored.")
 
-                    # Wake word ("Ultron"):
-                    # - Starts in SLEEPING mode waiting for 'Ultron' (or preserves state on reconnect)
-                    # - Once woken by 'Ultron', stays in LISTENING mode until user says 'descansar' or 'obrigado'!
+                    # Wake word mode (if enabled) or direct continuous listening
                     if self._wake_enabled:
                         self._ensure_wake_detector()
-                    if self._awake:
-                        self.ui.set_state("LISTENING")
-                        self.ui.write_log("SYS: Escuta do ULTRON ativa (diga 'pode descansar' ou 'obrigado' para desligar).")
+                        if self._awake:
+                            self.ui.set_state("LISTENING")
+                            self.ui.write_log("SYS: Escuta do ULTRON ativa.")
+                        else:
+                            self.ui.set_state("SLEEPING")
+                            self.ui.write_log("SYS: Modo de descanso ativo — diga 'Ultron' para ligar a escuta, Chefe.")
                     else:
-                        self.ui.set_state("SLEEPING")
-                        self.ui.write_log("SYS: Modo de descanso ativo — diga 'Ultron' para ligar a escuta, Chefe.")
+                        self._awake = True
+                        self.ui.set_state("LISTENING")
+                        self.ui.write_log("SYS: ULTRON online — escuta contínua ativa (sem palavra de ativação), Chefe.")
 
                     # What this machine will not permit, said once, on screen.
                     #
