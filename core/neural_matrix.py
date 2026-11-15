@@ -1,8 +1,8 @@
 """
 Holographic 3D neural core simulating brain synapses, action potentials,
 and cortical telemetry in the signature wine red ('cor vinho') palette.
-Evenly distributed Fibonacci spherical mesh for dense, cohesive connectivity without voids or holes.
-Subdued, opaque synaptic glowing hubs with reduced point density.
+Perfect spherical Fibonacci lattice for rounded outer silhouette with zero holes.
+Amplified organic breathing and voice-reactive expand/contract pulsation.
 """
 import math
 import random
@@ -22,82 +22,83 @@ class HoloNeuralSphere:
         self._pulse_rng = random.Random(2026)
         rng = random.Random(42)
 
-        # ── 1. 3D Neural Nodes Distributed by Fibonacci Sphere (Zero Holes) ──
-        # All 190 nodes maintained for complete 3D structure
+        # ── 1. Perfectly Spherical 3D Fibonacci Distribution (Rounded Edges) ─
         self.nodes = []
 
-        # Outer cortex: 110 nodes
-        n_out = 110
+        # Outer cortex: 120 nodes on a true smooth sphere (rad = 0.96)
+        n_out = 120
         phi = (1.0 + math.sqrt(5.0)) / 2.0
         for i in range(n_out):
             y = 1.0 - (i / float(n_out - 1)) * 2.0
             r_y = math.sqrt(max(0.0, 1.0 - y * y))
             th = 2.0 * math.pi * i / phi
-            rad = rng.uniform(0.82, 0.96)
-            self.nodes.append((rad * r_y * math.cos(th), rad * y * 0.94, rad * r_y * math.sin(th)))
+            rad = 0.96  # Uniform radius = perfectly round spherical silhouette!
+            self.nodes.append((rad * r_y * math.cos(th), rad * y, rad * r_y * math.sin(th)))
 
-        # Mid cortex: 55 nodes
-        n_mid = 55
+        # Mid cortex: 60 nodes (rad = 0.64)
+        n_mid = 60
         for i in range(n_mid):
             y = 1.0 - (i / float(n_mid - 1)) * 2.0
             r_y = math.sqrt(max(0.0, 1.0 - y * y))
             th = 2.0 * math.pi * (i + 0.33) / phi
-            rad = rng.uniform(0.52, 0.72)
-            self.nodes.append((rad * r_y * math.cos(th), rad * y * 0.94, rad * r_y * math.sin(th)))
+            rad = 0.64 + rng.uniform(-0.04, 0.04)
+            self.nodes.append((rad * r_y * math.cos(th), rad * y, rad * r_y * math.sin(th)))
 
-        # Inner core: 25 nodes
-        n_in = 25
+        # Inner core: 28 nodes (rad = 0.33)
+        n_in = 28
         for i in range(n_in):
             y = 1.0 - (i / float(n_in - 1)) * 2.0
             r_y = math.sqrt(max(0.0, 1.0 - y * y))
             th = 2.0 * math.pi * (i + 0.67) / phi
-            rad = rng.uniform(0.24, 0.44)
-            self.nodes.append((rad * r_y * math.cos(th), rad * y * 0.94, rad * r_y * math.sin(th)))
+            rad = 0.33 + rng.uniform(-0.03, 0.03)
+            self.nodes.append((rad * r_y * math.cos(th), rad * y, rad * r_y * math.sin(th)))
 
-        # ── 2. Prominent Synaptic Hubs (Reduced count: only ~45 hubs have visible glowing dots) ──
-        self.glowing_hubs = [i for i in range(len(self.nodes)) if i % 4 == 0 or i in (12, 34, 78, 120, 145, 175)]
+        # ── 2. Prominent Synaptic Hubs (Reduced count: ~40 hubs) ──────────────
+        self.glowing_hubs = [i for i in range(len(self.nodes)) if i % 5 == 0 or i in (14, 38, 72, 110, 140, 170)]
 
-        # ── 3. Full Highly Connected Synaptic Mesh (All connections preserved) ──
+        # ── 3. High-Connectivity Synaptic Mesh (No Holes, Smooth Curvature) ───
         self.edges = []
         linked = set()
         for i, a in enumerate(self.nodes):
             dists = sorted([(sum((x - y) ** 2 for x, y in zip(a, b)), j) for j, b in enumerate(self.nodes) if j != i])
-            # Primary local synaptic connections
+            # Connect local neighbors with strict distance so outer edges stay curved
+            max_d = 0.22 if i < n_out else 0.30
             for dist, j in dists[:6]:
                 pair = tuple(sorted((i, j)))
-                if pair not in linked and dist < 0.32:
+                if pair not in linked and dist < max_d:
                     linked.add(pair)
                     self.edges.append((*pair, rng.random()))
-            # Radial / cross-layer bridges
+            # Radial cross-layer bridges (inward towards core)
             for dist, j in dists[6:11]:
                 pair = tuple(sorted((i, j)))
-                if pair not in linked and 0.08 < dist < 0.48:
-                    if rng.random() > 0.45:
+                if pair not in linked and 0.08 < dist < 0.42:
+                    if rng.random() > 0.40:
                         linked.add(pair)
                         self.edges.append((*pair, rng.random()))
 
-        # ── 4. Cortical Surface Circuit Traces ────────────────────────────────
+        # ── 4. Smooth Rounded Shells & Orbital Arcs ───────────────────────────
+        self.shells = [
+            (0.98, -0.80, 0.0, math.tau),   # Near bottom round rim
+            (0.98,  0.80, 0.0, math.tau),   # Near top round rim
+            (0.97, -0.40, 0.3, 4.8),        # Lower mid band
+            (0.97,  0.40, 1.5, 4.8),        # Upper mid band
+            (0.97,  0.00, 0.0, math.tau),   # Smooth rounded equator
+            (0.76, -0.50, 0.8, 4.2),
+            (0.74,  0.45, 2.0, 4.2),
+        ]
+
+        # ── 5. Gyroscopic Rings ──────────────────────────────────────────────
+        self.gyro_arcs = []
+        for idx, rad in enumerate((0.38, 0.65, 0.88, 1.01)):
+            tilt = 0.25 + idx * 0.55
+            self.gyro_arcs.append((rad, tilt, idx))
+
+        # ── 6. Cortical Surface Circuit Traces ────────────────────────────────
         self.traces = [
             (rng.uniform(-1.25, 1.25), rng.uniform(0, math.tau),
-             rng.uniform(0.10, 0.38), rng.choice((0.75, 0.88, 1.01)), rng.random())
-            for _ in range(80)
+             rng.uniform(0.10, 0.35), rng.choice((0.75, 0.88, 0.97)), rng.random())
+            for _ in range(70)
         ]
-
-        # ── 5. Incomplete Curved Spherical Shells ────────────────────────────
-        self.shells = [
-            (1.02, -0.83, 0.2, 4.2),
-            (0.96, -0.35, 1.3, 4.5),
-            (0.93,  0.12, 0.5, 3.8),
-            (1.02,  0.58, 2.3, 4.1),
-            (0.76, -0.57, 0.8, 4.0),
-            (0.74,  0.42, 2.1, 4.4),
-        ]
-
-        # ── 6. Gyroscopic Arcs ───────────────────────────────────────────────
-        self.gyro_arcs = []
-        for idx, rad in enumerate((0.35, 0.63, 0.86, 1.07)):
-            tilt = 0.25 + idx * 0.57
-            self.gyro_arcs.append((rad, tilt, idx))
 
     @staticmethod
     def _sphere(lat, lon, rad=1.0):
@@ -111,27 +112,44 @@ class HoloNeuralSphere:
         dt = min(0.10, max(0.0, dt))
         self.amp_smooth += (max(0.0, min(1.0, amp)) - self.amp_smooth) * (1.0 - math.exp(-dt * 12))
         thinking = state in ("THINKING", "PROCESSING")
-        target = 0.0 if muted else (0.88 if thinking else (0.38 + self.amp_smooth * 0.62 if speaking else 0.14))
+        target = 0.0 if muted else (0.88 if thinking else (0.40 + self.amp_smooth * 0.60 if speaking else 0.16))
         self.activity += (target - self.activity) * (1.0 - math.exp(-dt * 6))
-        self.clock += dt * (0.70 + 1.10 * self.activity)
+        self.clock += dt * (0.75 + 1.15 * self.activity)
         self.phase += dt * (0.025 if muted else 0.085 + 0.10 * self.activity)
 
-        # Organic breathing pulse
+        # ── Amplified Expand & Contract Breathing Motion ─────────────────────
+        # 1. Deep natural organic breathing wave (amplified sinusoidal breathing)
+        breath_wave = (
+            math.sin(self.clock * 1.8) * 0.065
+            + math.sin(self.clock * 0.9 + 0.5) * 0.035
+        )
+
+        # 2. Stochastic drift
         self._pulse_wait -= dt
         if self._pulse_wait <= 0:
-            self._pulse_wait = self._pulse_rng.uniform(0.38, 1.45)
-            depth = 0.018 + 0.072 * self.activity
-            self._pulse_target = 1.0 + self._pulse_rng.uniform(-1.0, 0.85) * depth
-        wave = math.sin(self.clock * 2.3) * 0.009 + math.sin(self.clock * 3.71 + 0.8) * 0.006
-        target_scale = 1.0 if muted else self._pulse_target + wave + self.amp_smooth * 0.018
-        self.pulse_scale += (target_scale - self.pulse_scale) * (1.0 - math.exp(-dt * 4.8))
-        self.pulse_scale = max(0.88, min(1.08, self.pulse_scale))
+            self._pulse_wait = self._pulse_rng.uniform(0.5, 1.8)
+            depth = 0.035 + 0.085 * self.activity
+            self._pulse_target = 1.0 + self._pulse_rng.uniform(-1.0, 0.90) * depth
+
+        # 3. Audio / Speech dynamic expansion (significant responsive swell)
+        speech_lift = self.amp_smooth * 0.14 if speaking else self.amp_smooth * 0.06
+        think_lift = 0.05 * math.sin(self.clock * 4.5) if thinking else 0.0
+
+        target_scale = (
+            1.0 if muted else (self._pulse_target + breath_wave + speech_lift + think_lift)
+        )
+
+        # Elastic spring response
+        self.pulse_scale += (target_scale - self.pulse_scale) * (1.0 - math.exp(-dt * 5.2))
+        # Amplified scale range: 0.80 (deep contraction) to 1.22 (full expansion)
+        self.pulse_scale = max(0.80, min(1.22, self.pulse_scale))
 
     def paint(self, p: QPainter, cx: float, cy: float, r: float, W: float, H: float,
               main: QColor, acc: QColor, bg: QColor, name: str = "",
               state: str = "IDLE", speaking: bool = False, muted: bool = False):
         t = self.phase
-        r = min(r * self.pulse_scale, min(W, H) * 0.44)
+        # Use full dynamic pulse scale without premature clamping
+        r = r * self.pulse_scale
         activity = 0.0 if muted else self.activity
 
         if muted:
@@ -140,11 +158,11 @@ class HoloNeuralSphere:
             hot   = QColor("#a0aab4")
         else:
             color = main if (main and main.isValid() and main.name() != "#000000") else QColor("#922747")
-            # Subdued, opaque tones matching user request ("brilho das sinapses mais opaco")
+            # Subdued, opaque wine tones
             light = color.lighter(150)    # Soft rose-wine highlight
             hot   = color.lighter(180)    # Subdued wine spark
 
-        # Pre-mix color table for speed
+        # Pre-mix color table
         bg_r, bg_g, bg_b = bg.red(), bg.green(), bg.blue()
         c_r, c_g, c_b = color.red(), color.green(), color.blue()
         l_r, l_g, l_b = light.red(), light.green(), light.blue()
@@ -191,29 +209,29 @@ class HoloNeuralSphere:
             for a, b in zip(pts, pts[1:]):
                 segments.append(((a[1] + b[1]) * 0.5, a[0], b[0], brightness, width, bright))
 
-        # ── 1. Curved Shells ─────────────────────────────────────────────────
+        # ── 1. Smooth Rounded Spherical Shells (Silky High-Res Curvature) ────
         for shell, lat, start, span in self.shells:
-            path([sphere(lat, start + j * span / 48.0, shell) for j in range(49)], 0.44)
+            path([sphere(lat, start + j * span / 64.0, shell) for j in range(65)], 0.46)
 
         # ── 2. Gyro Arcs & Ticks ─────────────────────────────────────────────
-        for index, rad in enumerate((0.35, 0.63, 0.86, 1.07)):
-            tilt = 0.25 + index * 0.57
-            rot_dir = 1 if index % 2 else -1
+        for index, rad in enumerate(self.gyro_arcs):
+            r_gyro, tilt, idx = rad
+            rot_dir = 1 if idx % 2 else -1
             cos_tilt = math.cos(tilt)
             sin_tilt = math.sin(tilt)
 
             for offset in (0.2, 2.7, 4.9):
                 pts = []
-                for j in range(24):
-                    a = offset + j * 0.065 + t * rot_dir
-                    pts.append((rad * math.cos(a), rad * math.sin(a) * sin_tilt, rad * math.sin(a) * cos_tilt))
+                for j in range(28):
+                    a = offset + j * 0.055 + t * rot_dir
+                    pts.append((r_gyro * math.cos(a), r_gyro * math.sin(a) * sin_tilt, r_gyro * math.sin(a) * cos_tilt))
                 path(pts, 0.62, 0.95, True)
 
             for j in range(28):
                 a = j * math.tau / 28.0 + t * rot_dir
                 def at(r_val):
                     return (r_val * math.cos(a), r_val * math.sin(a) * sin_tilt, r_val * math.sin(a) * cos_tilt)
-                path([at(rad), at(rad + (0.018 if j % 4 else 0.036))], 0.45, 0.65)
+                path([at(r_gyro), at(r_gyro + (0.018 if j % 4 else 0.036))], 0.45, 0.65)
 
         # ── 3. Traces ────────────────────────────────────────────────────────
         for lat, lon, length, rad, seed in self.traces:
@@ -272,7 +290,6 @@ class HoloNeuralSphere:
             node = self.nodes[idx]
             point, z = project(*node)
             pulse = (max(0.0, math.sin(self.clock * 3.6 - idx * 1.5))) ** 8 * activity
-            # Subdued opacity: 0.18 base up to 0.55 during pulse
             alpha = (0.18 + pulse * 0.45) * max(0.25, 0.90 - z * 0.25)
             col_node = get_tint(False if pulse < 0.30 else True, alpha)
 

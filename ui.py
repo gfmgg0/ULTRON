@@ -905,7 +905,7 @@ class HudCanvas(QWidget):
                 _acc = qcol(C.PRI)
 
         if self._matrix is not None and self.hud_style in ("matrix", "core"):
-            self._matrix.paint(p, cx, _band_t + _band_h / 2.0, _r * 0.88, W, _band_h,
+            self._matrix.paint(p, cx, _band_t + _band_h / 2.0, _r * 0.82, W, _band_h,
                                main=_main, acc=_acc, bg=qcol(C.BG),
                                name=self._assistant_name, state=self.state,
                                speaking=self.speaking, muted=self.muted)
