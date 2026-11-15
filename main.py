@@ -1020,12 +1020,22 @@ class JarvisLive:
             "mudar para o ultron", "trocar para o ultron"
         ]
         if any(p in t_clean for p in switch_patterns_friday):
-            from actions.switch_assistant import switch_assistant
-            switch_assistant({"assistant": "friday"}, player=self.ui, speak=self.speak)
+            from memory.config_manager import set_persona
+            persona = set_persona("friday")
+            self.ui.apply_assistant_switch(
+                name=persona["name"], user_name="", ui_color=persona["color"], voice=persona["voice"]
+            )
+            self._switch_greeting = "friday"
+            self.request_reconnect(keep_context=False, reason="switched to FRIDAY")
             return
         if any(p in t_clean for p in switch_patterns_ultron):
-            from actions.switch_assistant import switch_assistant
-            switch_assistant({"assistant": "ultron"}, player=self.ui, speak=self.speak)
+            from memory.config_manager import set_persona
+            persona = set_persona("ultron")
+            self.ui.apply_assistant_switch(
+                name=persona["name"], user_name="", ui_color=persona["color"], voice=persona["voice"]
+            )
+            self._switch_greeting = "ultron"
+            self.request_reconnect(keep_context=False, reason="switched to ULTRON")
             return
 
         if self._wake_enabled and not self._awake:
@@ -1062,6 +1072,21 @@ class JarvisLive:
         if value:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
+            if getattr(self, "_switch_persona_after_turn", None):
+                target = self._switch_persona_after_turn
+                self._switch_persona_after_turn = None
+                from memory.config_manager import set_persona
+                persona = set_persona(target)
+                self.ui.apply_assistant_switch(
+                    name=persona["name"],
+                    user_name="",
+                    ui_color=persona["color"],
+                    voice=persona["voice"]
+                )
+                self._switch_greeting = target
+                self.request_reconnect(keep_context=False, reason=f"switched to {persona['name']}")
+                return
+
             if self._wake_enabled and getattr(self, "_sleep_after_turn", False):
                 self._sleep_after_turn = False
                 self._awake = False
@@ -1347,7 +1372,7 @@ class JarvisLive:
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=get_voice()
+                        voice_name=("Aoede" if is_friday else (get_voice() if get_voice() != "Aoede" else "Charon"))
                     )
                 )
             ),
@@ -1533,6 +1558,37 @@ class JarvisLive:
                     "Modo de descanso armado: a escuta ativa será desligada assim que você concluir sua despedida "
                     "e voltará a ligar quando o Chefe disser 'Ultron'."
                 )
+
+            elif name == "switch_assistant":
+                target_raw = str(args.get("assistant") or "").lower().strip()
+                target = "friday" if ("friday" in target_raw or "sexta" in target_raw) else "ultron"
+                self._switch_persona_after_turn = target
+                if target == "friday":
+                    result = (
+                        "Comando de transferência recebido: você está passando o comando para a FRIDAY. "
+                        "Apenas diga uma frase curta e elegante avisando que está passando o controle para a Friday agora."
+                    )
+                else:
+                    result = (
+                        "Comando de transferência recebido: você está passando o comando para o ULTRON. "
+                        "Apenas diga uma frase curta avisando que está passando o controle para o Ultron agora."
+                    )
+
+                async def _safety_switch(tgt):
+                    await asyncio.sleep(4.0)
+                    if getattr(self, "_switch_persona_after_turn", None) == tgt:
+                        self._switch_persona_after_turn = None
+                        from memory.config_manager import set_persona
+                        persona = set_persona(tgt)
+                        self.ui.apply_assistant_switch(
+                            name=persona["name"],
+                            user_name="",
+                            ui_color=persona["color"],
+                            voice=persona["voice"]
+                        )
+                        self._switch_greeting = tgt
+                        self.request_reconnect(keep_context=False, reason=f"switched to {persona['name']}")
+                asyncio.create_task(_safety_switch(target))
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
@@ -2089,6 +2145,33 @@ class JarvisLive:
             self.set_speaking(False)
             stream.stop()
             stream.close()
+
+    async def _send_persona_greeting(self, target: str) -> None:
+        """Immediately greet the user in the new persona's voice upon switching."""
+        await asyncio.sleep(0.7)
+        if not self.session:
+            return
+        if target == "friday":
+            prompt = (
+                "[SISTEMA: Você é a assistente FRIDAY. Sua voz é feminina ('Aoede'). "
+                "Você acabou de ser ativada e assumiu o comando no lugar do Ultron. "
+                "Fale em voz alta agora uma única frase curta de apresentação e saudação em português elegante, "
+                "com sua distinção e refinamento de dama erudita, se colocando à disposição do Senhor Gabriel.]"
+            )
+        else:
+            prompt = (
+                "[SISTEMA: Você é o assistente ULTRON. Sua voz é grave masculina ('Charon'). "
+                "Você acabou de reassumir o comando no lugar da Friday. "
+                "Fale em voz alta agora uma única frase curta e direta de apresentação em tom grave, "
+                "se colocando às ordens do Chefe.]"
+            )
+        try:
+            await self.session.send_client_content(
+                turns={"role": "user", "parts": [{"text": prompt}]},
+                turn_complete=True
+            )
+        except Exception as e:
+            print(f"[JARVIS] Greeting error: {e}")
 
     # ── Morning briefing ────────────────────────────────────────────────────────
 
@@ -2692,18 +2775,21 @@ class JarvisLive:
                         self.ui.write_log("SYS: Reconnected — conversation restored.")
 
                     # Wake word mode (if enabled) or direct continuous listening
+                    is_fri = "friday" in self._asst_name.lower()
+                    asst_display = "FRIDAY" if is_fri else "ULTRON"
+                    addr_display = "Senhor" if is_fri else "Chefe"
                     if self._wake_enabled:
                         self._ensure_wake_detector()
                         if self._awake:
                             self.ui.set_state("LISTENING")
-                            self.ui.write_log("SYS: Escuta do ULTRON ativa.")
+                            self.ui.write_log(f"SYS: Escuta de {asst_display} ativa.")
                         else:
                             self.ui.set_state("SLEEPING")
-                            self.ui.write_log("SYS: Modo de descanso ativo — diga 'Ultron' para ligar a escuta, Chefe.")
+                            self.ui.write_log(f"SYS: Modo de descanso ativo — diga '{asst_display}' para ligar a escuta, {addr_display}.")
                     else:
                         self._awake = True
                         self.ui.set_state("LISTENING")
-                        self.ui.write_log("SYS: ULTRON online — escuta contínua ativa (sem palavra de ativação), Chefe.")
+                        self.ui.write_log(f"SYS: {asst_display} online — escuta ativa ({addr_display}).")
 
                     # What this machine will not permit, said once, on screen.
                     #
@@ -2753,6 +2839,11 @@ class JarvisLive:
                     if not self._briefing_sent and get_brief_enabled() and self._awake:
                         self._briefing_sent = True
                         tg.create_task(self._send_startup_briefing())
+
+                    if getattr(self, "_switch_greeting", None):
+                        target_g = self._switch_greeting
+                        self._switch_greeting = None
+                        tg.create_task(self._send_persona_greeting(target_g))
 
             except KeyboardInterrupt:
                 raise

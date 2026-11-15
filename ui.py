@@ -4296,7 +4296,7 @@ class MainWindow(QMainWindow):
     _quiz_sig       = pyqtSignal(str, object, object)  # (topic, questions, grader)
     _quiz_hide_sig  = pyqtSignal()
     _review_sig     = pyqtSignal(str, str, object, object)  # document review payload
-    _name_update_sig = pyqtSignal(str, str, str, str)  # (name, user_name, ui_color, voice)
+    _name_update_sig = pyqtSignal(str, str, str, str, bool)  # (name, user_name, ui_color, voice, force_reconnect)
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -4307,6 +4307,8 @@ class MainWindow(QMainWindow):
         # Load customization from config
         _cfg = _read_full_config()
         self._assistant_name: str = (_cfg.get("assistant_name") or "JARVIS").strip()
+        self._current_name: str   = self._assistant_name
+        self._current_voice: str  = (_cfg.get("voice_name") or "").strip()
         _display = self._assistant_name.upper()
 
         # Apply the saved UI colour BEFORE panels/stylesheets are built
@@ -6619,9 +6621,12 @@ class MainWindow(QMainWindow):
             retheme_all_widgets(old, current_palette())
 
     def _apply_name_update(self, name: str, user_name: str, ui_color: str = "",
-                           voice: str = ""):
+                           voice: str = "", force_reconnect: bool = False):
         """Update all name/theme-dependent UI elements and persist to config."""
-        self._assistant_name = name.strip() or "JARVIS"
+        new_name = name.strip() or "JARVIS"
+        name_changed = (new_name != getattr(self, "_current_name", ""))
+        self._assistant_name = new_name
+        self._current_name   = new_name
         display = self._assistant_name.upper()
         self.setWindowTitle(f"{display} — {APP_VERSION}")
         self._title_lbl.setText(display)
@@ -6648,9 +6653,11 @@ class MainWindow(QMainWindow):
         # session so the new voice takes effect (it's fixed at connect time).
         voice_changed = False
         if voice:
-            from memory.config_manager import get_voice, save_voice
-            if voice != get_voice():
-                save_voice(voice)
+            from memory.config_manager import save_voice
+            new_v = voice.strip()
+            if new_v != getattr(self, "_current_voice", ""):
+                self._current_voice = new_v
+                save_voice(new_v)
                 voice_changed = True
 
         try:
@@ -6659,6 +6666,8 @@ class MainWindow(QMainWindow):
             data["user_name"] = user_name.strip()
             if ui_color:
                 data["ui_color"] = ui_color.strip().lower()
+            if voice:
+                data["voice_name"] = voice.strip()
             API_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
             self._log.append_log(f"SYS: Identity updated — {display}")
             if color_changed:
@@ -6668,8 +6677,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._log.append_log(f"ERR: Config save failed — {e}")
 
-        if voice_changed and self.on_voice_change:
-            QTimer.singleShot(1800, self.on_voice_change)
+        if (force_reconnect or voice_changed or name_changed) and self.on_voice_change:
+            self.on_voice_change()
 
     def _centre_overlay(self, ov) -> None:
         """Place a floating overlay in the middle of the HUD and show it."""
@@ -7180,7 +7189,7 @@ class JarvisUI:
 
     def apply_assistant_switch(self, name: str, user_name: str = "", ui_color: str = "", voice: str = "") -> None:
         """Thread-safe: Switch the assistant identity, theme color, and voice across UI and config."""
-        self._win._name_update_sig.emit(str(name), str(user_name), str(ui_color), str(voice))
+        self._win._name_update_sig.emit(str(name), str(user_name), str(ui_color), str(voice), True)
 
     def start_speaking(self):
         self.set_state("SPEAKING")
