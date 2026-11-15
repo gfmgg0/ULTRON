@@ -2,6 +2,7 @@
 Holographic 3D neural core simulating brain synapses, action potentials,
 and cortical telemetry in the signature wine red ('cor vinho') palette.
 Evenly distributed Fibonacci spherical mesh for dense, cohesive connectivity without voids or holes.
+Subdued, opaque synaptic glowing hubs with reduced point density.
 """
 import math
 import random
@@ -22,7 +23,7 @@ class HoloNeuralSphere:
         rng = random.Random(42)
 
         # ── 1. 3D Neural Nodes Distributed by Fibonacci Sphere (Zero Holes) ──
-        # 190 nodes distributed uniformly across 3 concentric volumetric layers
+        # All 190 nodes maintained for complete 3D structure
         self.nodes = []
 
         # Outer cortex: 110 nodes
@@ -53,8 +54,10 @@ class HoloNeuralSphere:
             rad = rng.uniform(0.24, 0.44)
             self.nodes.append((rad * r_y * math.cos(th), rad * y * 0.94, rad * r_y * math.sin(th)))
 
-        # ── 2. Highly Connected Synaptic Mesh (No Holes / Comprehensive Web) ──
-        # Connect each node to 6 nearest neighbors + cross-layer bridges
+        # ── 2. Prominent Synaptic Hubs (Reduced count: only ~45 hubs have visible glowing dots) ──
+        self.glowing_hubs = [i for i in range(len(self.nodes)) if i % 4 == 0 or i in (12, 34, 78, 120, 145, 175)]
+
+        # ── 3. Full Highly Connected Synaptic Mesh (All connections preserved) ──
         self.edges = []
         linked = set()
         for i, a in enumerate(self.nodes):
@@ -65,7 +68,7 @@ class HoloNeuralSphere:
                 if pair not in linked and dist < 0.32:
                     linked.add(pair)
                     self.edges.append((*pair, rng.random()))
-            # Radial / cross-layer bridges (connecting inner, mid, and outer layers)
+            # Radial / cross-layer bridges
             for dist, j in dists[6:11]:
                 pair = tuple(sorted((i, j)))
                 if pair not in linked and 0.08 < dist < 0.48:
@@ -73,14 +76,14 @@ class HoloNeuralSphere:
                         linked.add(pair)
                         self.edges.append((*pair, rng.random()))
 
-        # ── 3. Cortical Surface Circuit Traces ────────────────────────────────
+        # ── 4. Cortical Surface Circuit Traces ────────────────────────────────
         self.traces = [
             (rng.uniform(-1.25, 1.25), rng.uniform(0, math.tau),
              rng.uniform(0.10, 0.38), rng.choice((0.75, 0.88, 1.01)), rng.random())
             for _ in range(80)
         ]
 
-        # ── 4. Incomplete Curved Spherical Shells ────────────────────────────
+        # ── 5. Incomplete Curved Spherical Shells ────────────────────────────
         self.shells = [
             (1.02, -0.83, 0.2, 4.2),
             (0.96, -0.35, 1.3, 4.5),
@@ -90,7 +93,7 @@ class HoloNeuralSphere:
             (0.74,  0.42, 2.1, 4.4),
         ]
 
-        # ── 5. Gyroscopic Arcs ───────────────────────────────────────────────
+        # ── 6. Gyroscopic Arcs ───────────────────────────────────────────────
         self.gyro_arcs = []
         for idx, rad in enumerate((0.35, 0.63, 0.86, 1.07)):
             tilt = 0.25 + idx * 0.57
@@ -134,13 +137,14 @@ class HoloNeuralSphere:
         if muted:
             color = QColor("#75818c")
             light = QColor("#b2bdc6")
-            hot   = QColor("#d0d7dc")
+            hot   = QColor("#a0aab4")
         else:
             color = main if (main and main.isValid() and main.name() != "#000000") else QColor("#922747")
-            light = color.lighter(185)
-            hot   = QColor("#ffd2de")
+            # Subdued, opaque tones matching user request ("brilho das sinapses mais opaco")
+            light = color.lighter(150)    # Soft rose-wine highlight
+            hot   = color.lighter(180)    # Subdued wine spark
 
-        # Pre-mix color table for blazing fast rendering
+        # Pre-mix color table for speed
         bg_r, bg_g, bg_b = bg.red(), bg.green(), bg.blue()
         c_r, c_g, c_b = color.red(), color.green(), color.blue()
         l_r, l_g, l_b = light.red(), light.green(), light.blue()
@@ -189,7 +193,7 @@ class HoloNeuralSphere:
 
         # ── 1. Curved Shells ─────────────────────────────────────────────────
         for shell, lat, start, span in self.shells:
-            path([sphere(lat, start + j * span / 48.0, shell) for j in range(49)], 0.48)
+            path([sphere(lat, start + j * span / 48.0, shell) for j in range(49)], 0.44)
 
         # ── 2. Gyro Arcs & Ticks ─────────────────────────────────────────────
         for index, rad in enumerate((0.35, 0.63, 0.86, 1.07)):
@@ -203,20 +207,20 @@ class HoloNeuralSphere:
                 for j in range(24):
                     a = offset + j * 0.065 + t * rot_dir
                     pts.append((rad * math.cos(a), rad * math.sin(a) * sin_tilt, rad * math.sin(a) * cos_tilt))
-                path(pts, 0.70, 1.0, True)
+                path(pts, 0.62, 0.95, True)
 
             for j in range(28):
                 a = j * math.tau / 28.0 + t * rot_dir
                 def at(r_val):
                     return (r_val * math.cos(a), r_val * math.sin(a) * sin_tilt, r_val * math.sin(a) * cos_tilt)
-                path([at(rad), at(rad + (0.018 if j % 4 else 0.036))], 0.50, 0.65)
+                path([at(rad), at(rad + (0.018 if j % 4 else 0.036))], 0.45, 0.65)
 
         # ── 3. Traces ────────────────────────────────────────────────────────
         for lat, lon, length, rad, seed in self.traces:
-            path([sphere(lat, lon + j * length / 6.0, rad) for j in range(7)], 0.72, 0.8, seed > 0.7)
-            path([sphere(lat, lon, rad), sphere(lat + 0.035, lon, rad), sphere(lat + 0.035, lon + 0.045, rad)], 0.55, 0.7)
+            path([sphere(lat, lon + j * length / 6.0, rad) for j in range(7)], 0.65, 0.75, seed > 0.7)
+            path([sphere(lat, lon, rad), sphere(lat + 0.035, lon, rad), sphere(lat + 0.035, lon + 0.045, rad)], 0.50, 0.65)
             if seed > 0.7:
-                path([sphere(lat, lon + length, rad), sphere(lat, lon + length, rad + 0.055), sphere(lat, lon + length + 0.08, rad + 0.055)], 0.60, 0.7)
+                path([sphere(lat, lon + length, rad), sphere(lat, lon + length, rad + 0.055), sphere(lat, lon + length + 0.08, rad + 0.055)], 0.55, 0.65)
 
         # ── 4. Synaptic Axons (Dense Connected Neural Network) ───────────────
         for i, j, seed in self.edges:
@@ -232,66 +236,64 @@ class HoloNeuralSphere:
             p.setPen(QPen(col, width))
             p.drawLine(a, b)
 
-        # ── 5. Action Potentials ─────────────────────────────────────────────
+        # ── 5. Action Potentials (Subdued Opaque Wine Impulses) ───────────────
         if activity > 0.05:
             for i, j, seed in self.edges:
-                if seed > activity * 0.55:
+                if seed > activity * 0.40:
                     continue
-                progress = (self.clock * (0.75 + seed) + seed * 3.0) % 1.0
+                progress = (self.clock * (0.70 + seed) + seed * 3.0) % 1.0
                 a, b = self.nodes[i], self.nodes[j]
                 ix = a[0] + (b[0] - a[0]) * progress
                 iy = a[1] + (b[1] - a[1]) * progress
                 iz = a[2] + (b[2] - a[2]) * progress
                 head, z = project(ix, iy, iz)
 
-                ptx = a[0] + (b[0] - a[0]) * max(0.0, progress - 0.16)
-                pty = a[1] + (b[1] - a[1]) * max(0.0, progress - 0.16)
-                ptz = a[2] + (b[2] - a[2]) * max(0.0, progress - 0.16)
+                ptx = a[0] + (b[0] - a[0]) * max(0.0, progress - 0.14)
+                pty = a[1] + (b[1] - a[1]) * max(0.0, progress - 0.14)
+                ptz = a[2] + (b[2] - a[2]) * max(0.0, progress - 0.14)
                 tail, _ = project(ptx, pty, ptz)
 
-                intensity = activity * (0.75 - 0.18 * z)
-                col_trail = get_tint(False, intensity * 0.40)
-                col_core = get_tint(True, intensity)
+                intensity = activity * (0.65 - 0.15 * z)
+                col_trail = get_tint(False, intensity * 0.35)
+                col_core = get_tint(True, intensity * 0.75)
 
-                p.setPen(QPen(col_trail, 4.0))
+                p.setPen(QPen(col_trail, 3.5))
                 p.drawLine(tail, head)
-                p.setPen(QPen(col_core, 1.25))
+                p.setPen(QPen(col_core, 1.1))
                 p.drawLine(tail, head)
 
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(hot)
-                sz = 1.4 + activity * 0.9
+                p.setBrush(col_core)
+                sz = 1.2 + activity * 0.7
                 p.drawEllipse(head, sz, sz)
 
-        # ── 6. Soma Nodes ────────────────────────────────────────────────────
-        for i, node in enumerate(self.nodes):
+        # ── 6. Soma Nodes (Reduced count: Only major hubs, more opaque/subdued) ──
+        for idx in self.glowing_hubs:
+            node = self.nodes[idx]
             point, z = project(*node)
-            pulse = (max(0.0, math.sin(self.clock * 4.0 - i * 1.5))) ** 8 * activity
-            alpha = (0.24 + pulse * 0.70) * max(0.30, 1.0 - z * 0.30)
-            col_node = get_tint(True, alpha)
+            pulse = (max(0.0, math.sin(self.clock * 3.6 - idx * 1.5))) ** 8 * activity
+            # Subdued opacity: 0.18 base up to 0.55 during pulse
+            alpha = (0.18 + pulse * 0.45) * max(0.25, 0.90 - z * 0.25)
+            col_node = get_tint(False if pulse < 0.30 else True, alpha)
 
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(col_node)
-            p.drawEllipse(point, 1.2 + pulse * 1.6, 1.2 + pulse * 1.6)
-
-            if pulse > 0.40:
-                p.setPen(QPen(col_node, 0.70))
-                p.setBrush(Qt.BrushStyle.NoBrush)
-                p.drawEllipse(point, 3.2 + pulse * 3.0, 3.2 + pulse * 3.0)
+            sz = 0.95 + pulse * 1.2
+            p.drawEllipse(point, sz, sz)
 
         # ── 7. Nucleus ───────────────────────────────────────────────────────
         for index, scale in enumerate((0.072, 0.105, 0.15)):
             radius = r * scale
             p.setBrush(Qt.BrushStyle.NoBrush)
-            col_arc = get_tint(True, 0.42 + activity * 0.20)
-            p.setPen(QPen(col_arc, 0.80))
+            col_arc = get_tint(True, 0.38 + activity * 0.18)
+            p.setPen(QPen(col_arc, 0.75))
             rect = QRectF(cx - radius, cy - radius, radius * 2, radius * 2)
             p.drawArc(rect, int((self.clock * 18 * (1 if index % 2 else -1) + index * 80) * 16), 245 * 16)
 
-        glow = QRadialGradient(cx, cy, r * 0.050)
-        glow.setColorAt(0.00, hot)
+        glow = QRadialGradient(cx, cy, r * 0.048)
+        glow.setColorAt(0.00, light)
         glow.setColorAt(0.35, color)
         glow.setColorAt(1.00, bg)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(glow))
-        p.drawEllipse(QPointF(cx, cy), r * 0.050, r * 0.050)
+        p.drawEllipse(QPointF(cx, cy), r * 0.048, r * 0.048)
